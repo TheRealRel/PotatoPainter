@@ -32,11 +32,19 @@ namespace PotatoPainter
         internal static Material Material(Rune rune)
         {
             if (materials.TryGetValue(rune.Art, out var m)) return m;
-            var source = Leaf();
             var tex = Texture(rune);
-            if (!source || !tex) return null;
-            m = new Material(source) { name = "PotatoPainter " + rune.Art, mainTexture = tex };
+            if (!Leaf() || !tex) return null;
+            m = new Material(leaf) { name = "PotatoPainter " + rune.Art, mainTexture = tex };
             materials[rune.Art] = m;
+            return m;
+        }
+
+        // The paint look with any drawing and a fixed colour (the Rúnakefli's own runes).
+        internal static Material Paint(string name, Texture2D tex, Color col)
+        {
+            if (!Leaf() || !tex) return null;
+            var m = new Material(leaf) { name = "PotatoPainter " + name, mainTexture = tex };
+            if (m.HasProperty("_Color")) m.SetColor("_Color", col);
             return m;
         }
 
@@ -44,7 +52,7 @@ namespace PotatoPainter
         {
             if (looked) return leaf;
             looked = true;
-            var beech = ZNetScene.instance ? ZNetScene.instance.GetPrefab("Beech1") : null;
+            var beech = Jotunn.Managers.PrefabManager.Instance.GetPrefab("Beech1");
             var source = beech ? beech.GetComponentsInChildren<Renderer>(true).SelectMany(r => r.sharedMaterials).FirstOrDefault(x => x && x.shader && x.shader.name == "Custom/Vegetation") : null;
             if (!source) { Plugin.Log.LogError("The beech's leaf material wasn't found; paint can't be drawn this session."); return null; }
             leaf = new Material(source) { name = "PotatoPainter paint" };
@@ -67,7 +75,7 @@ namespace PotatoPainter
 
         // Mipmaps made by averaging lose alpha coverage: each smaller level's alpha is scaled so the share of texels at or
         // above the cut-out matches the full-size image.
-        private static void KeepCoverage(Texture2D t, float cutoff)
+        internal static void KeepCoverage(Texture2D t, float cutoff)
         {
             var top = t.GetPixels(0);
             float Cover(Color[] px, float k) { int n = 0; foreach (var c in px) if (c.a * k >= cutoff) n++; return (float)n / px.Length; }

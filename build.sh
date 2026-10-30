@@ -8,6 +8,8 @@ python3 -I check_config_names.py src/*.cs || { echo "Build stopped: fix the sett
 python3 -I check_patches.py src/*.cs || { echo "Build stopped: a patch class above is never switched on."; exit 1; }
 # Every rune drawing goes into the DLL as a resource named runes.<file>.
 RES=""; for f in assets/runes/*.png; do RES="$RES -resource:$f,runes.$(basename "$f")"; done
+# The Rúnakefli's model, its texture and its painted word (tools/kefli.py), as runakefli.<file>.
+for f in assets/runakefli/*; do RES="$RES -resource:$f,runakefli.$(basename "$f")"; done
 mkdir -p out
 $CSC -nologo -nostdlib -noconfig -target:library -optimize+ -deterministic -langversion:9 -out:out/PotatoPainter.dll $RES \
   -r:"$M/mscorlib.dll" -r:"$M/netstandard.dll" -r:"$M/System.dll" -r:"$M/System.Core.dll" \

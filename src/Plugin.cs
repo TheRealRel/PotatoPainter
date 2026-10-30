@@ -23,7 +23,7 @@ namespace PotatoPainter
     [NetworkCompatibility(CompatibilityLevel.EveryoneMustHaveMod, VersionStrictness.Minor)]
     public class Plugin : BaseUnityPlugin
     {
-        public const string Id = "potato.painter", Version = "0.1.0";
+        public const string Id = "potato.painter", Version = "0.1.1";
         // Saved in worlds and inventories: never rename.
         public const string ToolPrefab = "potato_runakefli";
         public const string TablePrefab = "_PotatoRunakefliPieceTable";
@@ -89,7 +89,10 @@ namespace PotatoPainter
                 if (PrefabManager.Instance.GetPrefab(item)) config.AddRequirement(new RequirementConfig(item, amount, 0, true));
                 else Log.LogWarning($"The Rúnakefli's recipe item {item} wasn't found; it's left out of the recipe this session.");
             }
-            ItemManager.Instance.AddItem(new CustomItem(ToolPrefab, "Hammer", config));
+            var tool = new CustomItem(ToolPrefab, "Hammer", config);
+            try { Tool.Dress(tool.ItemPrefab); Tool.Icon(tool.ItemDrop); }
+            catch (Exception e) { Log.LogWarning("The Rúnakefli keeps the hammer's look this session: " + e); }
+            ItemManager.Instance.AddItem(tool);
         }
 
         // One piece per drawn design, free to paint for now. The piece has no model and no collider: Jötunn's empty prefab
@@ -155,6 +158,17 @@ namespace PotatoPainter
             Log.LogInfo($"{target.Rune?.Name} at {at:F2}: removed with the Rúnakefli");
             target.Delete();
             player.Message(MessageHud.MessageType.TopLeft, "$msg_potato_paint_removed");
+        }
+
+        // No placement marker (the game's yellow outline and arrow) with the Rúnakefli: the paint's own preview shows where
+        // it goes. UpdatePlacementGhost turns the marker on every frame it's valid, so it's hidden after it, each frame.
+        [HarmonyPatch(typeof(Player), "UpdatePlacementGhost")]
+        internal static class NoPlacementMarker
+        {
+            private static void Postfix(Player __instance, GameObject ___m_placementMarkerInstance)
+            {
+                if (___m_placementMarkerInstance && Table && BuildPieces(__instance) == Table) ___m_placementMarkerInstance.SetActive(false);
+            }
         }
 
         // A piece or tree being destroyed (removed, broken, cut; not just unloaded, which never goes through here): every
