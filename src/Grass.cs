@@ -23,10 +23,11 @@ namespace PotatoPainter
     {
         // Added to each clutter's reach (wind sway), and how far above or below the paint's surface a root counts.
         internal const float Margin = 0.05f, Depth = 0.75f;
-        // At most this far past the rune's square, so a 0.5 m rune gets a bare square of about 2 m; the biggest clumps
-        // rooted farther out can still lean over its edges (the user, 2026-10-30: "Blades at the edges is fine").
+        // At most this far past the rune's square, so a 0.5 m rune gets a bare square of about 1.5 m; bigger clumps rooted
+        // farther out can still lean over its edges (the user, 2026-10-30: "Blades at the edges is fine"; at 0.75 m, test
+        // 0.1.6: "can we reduce the grass removal to be slightly smaller?").
         // Measured reach without the cap: meadow grass 2.14 m, short meadow grass 1.42 m, vass 3.19 m (test 0.1.3).
-        internal const float ReachCap = 0.75f;
+        internal const float ReachCap = 0.5f;
         // Patches marked to be made again reach this far past the rune's square (more than any clutter's reach so far).
         private const float ResetReach = 2.5f;
         private static readonly Dictionary<ClutterSystem.Clutter, float> reach = new Dictionary<ClutterSystem.Clutter, float>();
@@ -65,7 +66,7 @@ namespace PotatoPainter
 
         private static void Reset(Area a)
         {
-            if (!ClutterSystem.instance) { Plugin.Log.LogInfo("Grass: no clutter system to remake"); return; }
+            if (!ClutterSystem.instance) return;   // leaving the world: nothing to remake
             ClutterSystem.instance.ResetGrass(a.Center, a.Half + ResetReach);
             Plugin.Log.LogInfo($"Grass: asked the game to remake its clutter patches within {a.Half + ResetReach:0.0} m of {a.Center:F2} ({list.Length} ground paints known)");
         }

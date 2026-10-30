@@ -23,7 +23,7 @@ namespace PotatoPainter
     [NetworkCompatibility(CompatibilityLevel.EveryoneMustHaveMod, VersionStrictness.Minor)]
     public class Plugin : BaseUnityPlugin
     {
-        public const string Id = "potato.painter", Version = "0.1.6";
+        public const string Id = "potato.painter", Version = "0.1.7";
         // Saved in worlds and inventories: never rename.
         public const string ToolPrefab = "potato_runakefli";
         public const string TablePrefab = "_PotatoRunakefliPieceTable";

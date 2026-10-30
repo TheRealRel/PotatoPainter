@@ -1,3 +1,7 @@
+## 0.1.7 (test build, not released)
+- The mouse wheel turns the rune before you paint it, like it turns a building piece.
+- Less grass is cleared around a rune on the ground (about 1.5 m across).
+
 ## 0.1.6 (test build, not released)
 - Īsaz and Perþō get a line on what they stood for too.
 - The grass cleared around a rune on the ground is about 2 m across; the tallest grass may still lean in at the edges.

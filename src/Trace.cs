@@ -74,7 +74,7 @@ namespace PotatoPainter
 
         // ------------------------------------------------------------------ aiming
         // Where a paint of this size would go along the ray, as the game draws the surfaces there.
-        internal static bool Aim(Vector3 eye, Vector3 dir, float max, float size, Vector3 cameraRight, out Frame frame, out string why)
+        internal static bool Aim(Vector3 eye, Vector3 dir, float max, float size, Vector3 cameraRight, float turn, out Frame frame, out string why)
         {
             frame = default; why = null;
             if (!Physics.Raycast(eye, dir, out var hit, max, Mask, QueryTriggerInteraction.Ignore)) { why = $"the aim ray hit nothing within {max:0.0} m"; return false; }
@@ -92,6 +92,9 @@ namespace PotatoPainter
             side = Vector3.ProjectOnPlane(side, n).normalized;
             if (Vector3.Dot(side, cameraRight) < 0f) side = -side;
             frame.Up = Vector3.Cross(side, n);
+            // The mouse wheel turns it about the surface's normal, the way it turns a piece (turn = the game's own placement
+            // rotation in degrees; seen from the front, clockwise as a piece turns seen from above).
+            if (turn != 0f) frame.Up = Quaternion.AngleAxis(turn, n) * frame.Up;
             return true;
         }
 
@@ -192,8 +195,30 @@ namespace PotatoPainter
                             if ((verts[a] - verts[b]).magnitude > cell || (verts[a] - verts[c]).magnitude > cell || (verts[d] - verts[b]).magnitude > cell || (verts[d] - verts[c]).magnitude > cell) continue;
                             tri.AddRange(new[] { a, c, b, b, c, d, a, b, c, b, d, c });   // both faces
                         }
+                    // Test data (0.1.6: runes on bumpy ground partly missing): how far below the drawn surface the sheet's
+                    // straight edges between its points dip, where they cross a fold of the surface.
+                    string sag = "";
+                    if (lv.Active && lv.Index == 0 && tri.Count > 0)
+                    {
+                        float worst = float.MaxValue; int under = 0, tested = 0;
+                        for (int y = 0; y < grid; y++)
+                            for (int x = 0; x < grid; x++)
+                            {
+                                int a = y * (grid + 1) + x;
+                                if (owner[a] != k || !ok[a] || !ok[a + 1] || !ok[a + grid + 1] || !ok[a + grid + 2]) continue;
+                                foreach (var (i0, i1) in new[] { (a, a + 1), (a, a + grid + 1), (a + 1, a + grid + 2), (a + 1, a + grid + 1) })
+                                {
+                                    var mid = (verts[i0] + verts[i1]) * 0.5f;
+                                    if (!Cast(surfaces, mid + n * reach, -n, reach * 2f, plane, out var at2, out _, out _, out _, out _)) continue;
+                                    float clear = Vector3.Dot(mid - at2, n); tested++;
+                                    if (clear < worst) worst = clear;
+                                    if (clear < 0.001f) under++;
+                                }
+                            }
+                        if (tested > 0) sag = $", lowest edge {worst * 1000f:0.0} mm above the surface, {under} of {tested} edges under 1 mm";
+                    }
                     if (lv.Active && lv.Index == 0)
-                        built.Report.Add($"{hosts[k].Root.name}{(hosts[k].FromColliders != null ? " (its models can't be read; traced on its colliders: " + hosts[k].FromColliders + ")" : "")}: {Enumerable.Range(0, count).Count(i => owner[i] == k && ok[i])} of {owner.Count(o => o == k)} points landed, {tri.Count / 12} of {grid * grid} squares");
+                        built.Report.Add($"{hosts[k].Root.name}{(hosts[k].FromColliders != null ? " (its models can't be read; traced on its colliders: " + hosts[k].FromColliders + ")" : "")}: {Enumerable.Range(0, count).Count(i => owner[i] == k && ok[i])} of {owner.Count(o => o == k)} points landed, {tri.Count / 12} of {grid * grid} squares{sag}");
                     if (tri.Count == 0) continue;
 
                     // Trees: bent on the CPU exactly like the bark's triangles, when the bark has no flutter or push and every

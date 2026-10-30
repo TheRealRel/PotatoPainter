@@ -40,7 +40,9 @@ namespace PotatoPainter
         private bool ghost, listed, placedWithoutAim, repeat;
         private Built built, preview;
         private float nextCheck, previewTime;
-        private Vector3 lastEye = Vector3.positiveInfinity, lastDir;
+        private Vector3 lastEye = Vector3.positiveInfinity, lastDir; private float lastTurn;
+        private static readonly HarmonyLib.AccessTools.FieldRef<Player, int> PlaceRotation = HarmonyLib.AccessTools.FieldRefAccess<Player, int>("m_placeRotation");
+        private static readonly HarmonyLib.AccessTools.FieldRef<Player, float> PlaceRotationDegrees = HarmonyLib.AccessTools.FieldRefAccess<Player, float>("m_placeRotationDegrees");
         private float visibleCheck = -1f;
 
         private float Lift => 0.004f + 0.002f * Layer;   // layers 2 mm apart, the newest on top (probe test 11)
@@ -163,6 +165,8 @@ namespace PotatoPainter
                 // Test data (0.1.3: ground runes not seen): is each sheet drawn, and what is between the camera and it.
                 visibleCheck = -1f;
                 var cam = Utils.GetMainCamera();
+                if (built.OnGround && Physics.Raycast(Frame.Center + Frame.Normal, -Frame.Normal, out var g, 2f, LayerMask.GetMask("terrain"), QueryTriggerInteraction.Ignore))
+                    Plugin.Log.LogInfo($"{Rune.Name} at {Frame.Center:F2}: the ground under its centre is now {Vector3.Dot(g.point - Frame.Center, Frame.Normal) * 1000f:0.0} mm from where it was painted");
                 foreach (var o in built.Objects)
                 {
                     var r = o ? o.GetComponent<Renderer>() : null;
@@ -192,17 +196,20 @@ namespace PotatoPainter
             var cam = Utils.GetMainCamera();
             if (!cam) return;
             var eye = cam.transform.position; var dir = cam.transform.forward;
+            var player = Player.m_localPlayer;
+            // The game's own placement rotation (mouse wheel), as it turns the ghost: m_placeRotation x m_placeRotationDegrees.
+            float turn = player ? Mathf.Repeat(PlaceRotation(player) * PlaceRotationDegrees(player), 360f) : 0f;
             // Retraced when the aim moves (at most ten times a second), and twice a second when it doesn't, so new paint
             // nearby (layers) and pieces that load show up in the preview too.
-            bool moved = (eye - lastEye).sqrMagnitude >= 1e-4f || Vector3.Angle(dir, lastDir) > 0.05f;
+            bool moved = (eye - lastEye).sqrMagnitude >= 1e-4f || Vector3.Angle(dir, lastDir) > 0.05f || turn != lastTurn;
             if (Time.time - previewTime < (moved ? 0.1f : 0.5f)) return;
-            lastEye = eye; lastDir = dir; previewTime = Time.time;
+            if (turn != lastTurn) Plugin.Log.LogInfo($"Preview of {Rune?.Name}: turned to {turn:0.#} degrees");
+            lastEye = eye; lastDir = dir; lastTurn = turn; previewTime = Time.time;
             preview?.Clear();
             // Grass is left out under the preview once the aim rests (a moving aim would remake the grass ten times a second).
             if (moved) Grass.Clear(this);
             bool was = aimValid;
-            aimValid = Trace.Aim(eye, dir, 50f, DefaultSize, cam.transform.right, out aim, out var why);
-            var player = Player.m_localPlayer;
+            aimValid = Trace.Aim(eye, dir, 50f, DefaultSize, cam.transform.right, turn, out aim, out var why);
             if (aimValid && player && Vector3.Distance(player.GetEyePoint(), aim.Center) > player.m_maxPlaceDistance)
             { aimValid = false; why = $"{Vector3.Distance(player.GetEyePoint(), aim.Center):0.0} m away, farther than you can build ({player.m_maxPlaceDistance:0.0} m)"; }
             aimTime = Time.time;
