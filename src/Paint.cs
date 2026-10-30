@@ -44,6 +44,7 @@ namespace PotatoPainter
         private static readonly HarmonyLib.AccessTools.FieldRef<Player, int> PlaceRotation = HarmonyLib.AccessTools.FieldRefAccess<Player, int>("m_placeRotation");
         private static readonly HarmonyLib.AccessTools.FieldRef<Player, float> PlaceRotationDegrees = HarmonyLib.AccessTools.FieldRefAccess<Player, float>("m_placeRotationDegrees");
         private float visibleCheck = -1f;
+        private Vector3? ghostGrassAt;
 
         private float Lift => 0.004f + 0.002f * Layer;   // layers 2 mm apart, the newest on top (probe test 11)
 
@@ -206,8 +207,9 @@ namespace PotatoPainter
             if (turn != lastTurn) Plugin.Log.LogInfo($"Preview of {Rune?.Name}: turned to {turn:0.#} degrees");
             lastEye = eye; lastDir = dir; lastTurn = turn; previewTime = Time.time;
             preview?.Clear();
-            // Grass is left out under the preview once the aim rests (a moving aim would remake the grass ten times a second).
-            if (moved) Grass.Clear(this);
+            // Grass is left out under the preview once the aim rests, and given back only when the aim leaves that spot
+            // (test 0.1.7: the camera's own small movements gave it back and took it again twice a second, remaking four
+            // grass patches each time).
             bool was = aimValid;
             aimValid = Trace.Aim(eye, dir, 50f, DefaultSize, cam.transform.right, turn, out aim, out var why);
             if (aimValid && player && Vector3.Distance(player.GetEyePoint(), aim.Center) > player.m_maxPlaceDistance)
@@ -217,10 +219,11 @@ namespace PotatoPainter
             if (!aimValid && (was || why != aimWhy)) Plugin.Log.LogInfo($"Preview of {Rune?.Name}: nothing to paint where you aim ({why})");
             else if (aimValid && !was) Plugin.Log.LogInfo($"Preview of {Rune?.Name}: on {aim.Center:F2}");
             aimWhy = why ?? "";
-            if (!aimValid) { Grass.Clear(this); return; }
+            if (!aimValid) { Grass.Clear(this); ghostGrassAt = null; return; }
+            if (ghostGrassAt.HasValue && Vector3.Distance(ghostGrassAt.Value, aim.Center) > 0.25f) { Grass.Clear(this); ghostGrassAt = null; }
             aimLayer = LayerAt(aim.Center, DefaultSize, null);
             preview = Trace.Build(aim, DefaultSize, 0.004f + 0.002f * aimLayer, Look.Material(Rune), Look.RedOchre, true, "preview");
-            if (!moved) Grass.Set(this, preview.OnGround, aim, DefaultSize);
+            if (!moved && !ghostGrassAt.HasValue && preview.OnGround) { Grass.Set(this, true, aim, DefaultSize); ghostGrassAt = aim.Center; }
         }
 
         // On top of every loaded paint it overlaps (centres closer than 0.9 x their mean size, probe test 13).
@@ -236,7 +239,7 @@ namespace PotatoPainter
         {
             if (!ghost) return;
             preview?.Clear(); preview = null;
-            Grass.Clear(this);
+            Grass.Clear(this); ghostGrassAt = null;
             lastEye = Vector3.positiveInfinity;
         }
 

@@ -23,7 +23,7 @@ namespace PotatoPainter
     [NetworkCompatibility(CompatibilityLevel.EveryoneMustHaveMod, VersionStrictness.Minor)]
     public class Plugin : BaseUnityPlugin
     {
-        public const string Id = "potato.painter", Version = "0.1.7";
+        public const string Id = "potato.painter", Version = "0.1.8";
         // Saved in worlds and inventories: never rename.
         public const string ToolPrefab = "potato_runakefli";
         public const string TablePrefab = "_PotatoRunakefliPieceTable";
@@ -145,7 +145,7 @@ namespace PotatoPainter
             }
         }
 
-        private void LateUpdate() => Bend.Update();
+        private void LateUpdate() { Bend.Update(); Ground.Update(); }
 
         // The Rúnakefli's remove: the topmost paint where you aim, with the game's own no-build and ward checks.
         private static void RemoveAimed(Player player)

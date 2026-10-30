@@ -24,6 +24,7 @@ namespace PotatoPainter
         internal readonly List<GameObject> Objects = new List<GameObject>();
         internal readonly List<(LODGroup group, int level, Renderer r)> Registered = new List<(LODGroup, int, Renderer)>();
         internal readonly List<Bend.Bender> Benders = new List<Bend.Bender>();
+        internal readonly List<Ground.Sheet> GroundSheets = new List<Ground.Sheet>();
         internal Transform CenterHost;
         internal readonly HashSet<int> Hosts = new HashSet<int>();
         internal int Sheets;
@@ -43,6 +44,8 @@ namespace PotatoPainter
             }
             foreach (var o in Objects) if (o) UnityEngine.Object.Destroy(o);
             foreach (var b in Benders) Bend.All.Remove(b);
+            foreach (var g in GroundSheets) Ground.Remove(g);
+            GroundSheets.Clear();
             Objects.Clear(); Registered.Clear(); Benders.Clear(); Hosts.Clear(); Sheets = 0; CenterHost = null; OnGround = false; Points = Missed = 0; Report.Clear();
         }
     }
@@ -246,7 +249,20 @@ namespace PotatoPainter
                     r.receiveShadows = true;
                     Look.Colour(r, col);
                     built.Objects.Add(go); built.Sheets++;
-                    if (hosts[k].Root.GetComponent<Heightmap>()) built.OnGround = true;
+                    var groundHm = hosts[k].Root.GetComponent<Heightmap>();
+                    if (groundHm)
+                    {
+                        built.OnGround = true;
+                        // On the ground: laid on the ground as it is drawn (Ground.cs), refreshed as the camera moves.
+                        var on = new List<(int, int, int, int, Vector3, Vector3, Vector3)>();
+                        for (int i = 0; i < count; i++)
+                            if (ok[i] && owner[i] == k)
+                                on.Add((i, corners[3 * i], corners[3 * i + 1], corners[3 * i + 2], bary[i], verts[i] - normals[i] * lift, normals[i]));
+                        mesh.MarkDynamic();
+                        var gs = Ground.Make(groundHm, mesh, r, parent, lift, on);
+                        if (gs != null) built.GroundSheets.Add(gs);
+                        else if (!preview) built.Report.Add("ground sheet left as traced (the drawn ground couldn't be read)");
+                    }
                     if (cpu)
                     {
                         var hm = hostR.GetComponent<MeshFilter>().sharedMesh;
