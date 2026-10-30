@@ -73,14 +73,14 @@ namespace PotatoPainter
 
         // ------------------------------------------------------------------ aiming
         // Where a paint of this size would go along the ray, as the game draws the surfaces there.
-        internal static bool Aim(Vector3 eye, Vector3 dir, float max, float size, Vector3 cameraRight, out Frame frame)
+        internal static bool Aim(Vector3 eye, Vector3 dir, float max, float size, Vector3 cameraRight, out Frame frame, out string why)
         {
-            frame = default;
-            if (!Physics.Raycast(eye, dir, out var hit, max, Mask, QueryTriggerInteraction.Ignore)) return false;
+            frame = default; why = null;
+            if (!Physics.Raycast(eye, dir, out var hit, max, Mask, QueryTriggerInteraction.Ignore)) { why = $"the aim ray hit nothing within {max:0.0} m"; return false; }
             var hosts = Hosts(hit.point, size, hit.collider);
-            if (hosts.Count == 0) return false;
+            if (hosts.Count == 0) { why = $"the aim ray hit {hit.collider.name} (layer {LayerMask.LayerToName(hit.collider.gameObject.layer)}), which has no surface that can be read"; return false; }
             var reference = hosts.SelectMany(h => h.Reference).ToList();
-            if (!Cast(reference, eye, dir, hit.distance + 1.5f, default, out var center, out var n, out var aimed, out var aimedTri, out _)) return false;
+            if (!Cast(reference, eye, dir, hit.distance + 1.5f, default, out var center, out var n, out var aimed, out var aimedTri, out _)) { why = $"the aim ray hit {hit.collider.name}, but none of the drawn surfaces of {string.Join(", ", hosts.Select(h => h.Root.name))} lies on it"; return false; }
             var mat = aimed.TriMat != null ? aimed.TriMat[aimedTri] : null;
             frame.Center = center; frame.Normal = n;
             frame.Tree = mat && mat.shader && mat.shader.name == "Custom/Vegetation";

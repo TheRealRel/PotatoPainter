@@ -23,7 +23,7 @@ namespace PotatoPainter
     [NetworkCompatibility(CompatibilityLevel.EveryoneMustHaveMod, VersionStrictness.Minor)]
     public class Plugin : BaseUnityPlugin
     {
-        public const string Id = "potato.painter", Version = "0.1.2";
+        public const string Id = "potato.painter", Version = "0.1.3";
         // Saved in worlds and inventories: never rename.
         public const string ToolPrefab = "potato_runakefli";
         public const string TablePrefab = "_PotatoRunakefliPieceTable";
@@ -36,6 +36,8 @@ namespace PotatoPainter
         internal static PieceTable Table;
         internal static readonly HashSet<Paint> Doomed = new HashSet<Paint>();
         private static readonly AccessTools.FieldRef<Player, PieceTable> BuildPieces = AccessTools.FieldRefAccess<Player, PieceTable>("m_buildPieces");
+        private static readonly AccessTools.FieldRef<Player, GameObject> PlacementGhost = AccessTools.FieldRefAccess<Player, GameObject>("m_placementGhost");
+        private static readonly System.Reflection.FieldInfo PlacementStatus = AccessTools.Field(typeof(Player), "m_placementStatus");
         private static readonly Func<Player, bool> TakeInput = AccessTools.MethodDelegate<Func<Player, bool>>(AccessTools.Method(typeof(Player), "TakeInput"));
 
         private void Awake()
@@ -54,6 +56,7 @@ namespace PotatoPainter
                 { "item_potato_runakefli_description", "A carved rune stick with pigment of berries, bark and bone. Paints runes onto walls, floors, rocks, trees and the ground. Middle mouse takes a paint away again." },
                 { "msg_potato_paint_nosurface", "Nothing to paint on there" },
                 { "msg_potato_paint_removed", "Paint removed" },
+                { "msg_potato_paint_repeat", "Already painted there" },
             };
             foreach (var rune in Runes.All)
             {
@@ -134,6 +137,12 @@ namespace PotatoPainter
             var player = Player.m_localPlayer;
             if (!player || !Table || !player.InPlaceMode() || BuildPieces(player) != Table || !TakeInput(player)) return;
             if (ZInput.GetButtonDown("Remove") || ZInput.GetButtonDown("JoyRemove")) RemoveAimed(player);
+            // Test data (0.1.2: "clicks did nothing"): what the game thought of the spot on each click with the Rúnakefli.
+            if (ZInput.GetButtonDown("Attack") || ZInput.GetButtonDown("JoyPlace"))
+            {
+                var ghost = PlacementGhost(player);
+                Log.LogInfo($"Click with the Rúnakefli: the game's placement is {PlacementStatus.GetValue(player)}, ghost {(ghost ? (ghost.activeSelf ? "shown" : "hidden") + " at " + ghost.transform.position.ToString("F2") : "none")}");
+            }
         }
 
         private void LateUpdate() => Bend.Update();

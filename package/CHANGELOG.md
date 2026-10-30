@@ -1,3 +1,8 @@
+## 0.1.3 (test build, not released)
+- Grass clears far enough around a rune on the ground that no blades lean over it.
+- Painting the same rune on the same spot again does nothing ("Already painted there"). Piles of the same rune already painted on one spot are cut down to one.
+- Each rune's tooltip shows its meaning.
+
 ## 0.1.2 (test build, not released)
 - Runes on the ground can be seen now: grass and other ground clutter are left out under them, and come back when the paint is removed. The ground itself isn't changed.
 - The runes on the Rúnakefli glow ember, sit in the middle of the plain wood and are a little larger.
