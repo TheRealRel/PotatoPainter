@@ -1,3 +1,6 @@
+## 0.1.5 (test build, not released)
+- Each rune's tooltip adds a short line on what it stood for.
+
 ## 0.1.4 (test build, not released)
 - The preview and the paint follow the crosshair, the same aim the game uses for building, so snapping no longer sends it off the surface.
 - Pieces from mods whose models can't be read are painted on their collision shape.

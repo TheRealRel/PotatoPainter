@@ -1,6 +1,6 @@
 {
     "name": "PotatoPainter",
-    "version_number": "0.1.4",
+    "version_number": "0.1.5",
     "website_url": "https://github.com/TheRealRel/PotatoPainter",
     "description": "Paint runes onto walls, floors, rocks, trees and the ground with the Rúnakefli. The paint lies on the surface, takes the world's light and bends with the bark.",
     "dependencies": [

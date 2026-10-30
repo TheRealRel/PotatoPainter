@@ -9,7 +9,7 @@ namespace PotatoPainter
 {
     internal sealed class Rune
     {
-        internal string Row, Aett, Name, Sound, Letter, Art, Meaning;
+        internal string Row, Aett, Name, Sound, Letter, Art, Meaning, Note;
         internal int Position;
         // Saved in worlds (one piece prefab per design): never rename.
         internal string Prefab => "potato_paint_" + Art;
@@ -23,18 +23,19 @@ namespace PotatoPainter
 
         // Elder Futhark, Kylver Stone order: three ættir of eight, each named after its first rune.
         // Meanings: the reconstructed Proto-Germanic names' meanings as Wikipedia's Elder Futhark table gives them (read
-        // 2026-10-30 through a copy of that table), shortened.
-        private static readonly (string aett, string name, string sound, string letter, string art, string meaning)[] ElderRunes =
+        // 2026-10-30 through a copy of that table), shortened. Notes: what each rune stood for, from the medieval rune poems as
+        // norse-mythology.org's "The Meanings of the Runes" sums them up (read 2026-10-30), reworded.
+        private static readonly (string aett, string name, string sound, string letter, string art, string meaning, string note)[] ElderRunes =
         {
-            ("f", "Fehu", "f", "ᚠ", "elder_fehu", "Cattle, wealth"), ("f", "Ūruz", "u", "ᚢ", "elder_uruz", "Aurochs"), ("f", "Þurisaz", "þ", "ᚦ", "elder_thurisaz", "Giant"),
-            ("f", "Ansuz", "a", "ᚨ", "elder_ansuz", "God"), ("f", "Raidō", "r", "ᚱ", "elder_raido", "Ride, journey"), ("f", "Kauną", "k", "ᚲ", "elder_kauna", "Ulcer, or torch"),
-            ("f", "Gebō", "g", "ᚷ", "elder_gebo", "Gift"), ("f", "Wunjō", "w", "ᚹ", "elder_wunjo", "Joy"),
-            ("h", "Hagalaz", "h", "ᚺ", "elder_hagalaz", "Hail"), ("h", "Naudiz", "n", "ᚾ", "elder_naudiz", "Need"), ("h", "Īsaz", "i", "ᛁ", "elder_isaz", "Ice"),
-            ("h", "Jēra", "j", "ᛃ", "elder_jera", "Year, harvest"), ("h", "Ī(h)waz", "ï", "ᛇ", "elder_ihwaz", "Yew tree"), ("h", "Perþō", "p", "ᛈ", "elder_pertho", "Meaning unknown, perhaps pear tree"),
-            ("h", "Algiz", "z", "ᛉ", "elder_algiz", "Elk, or protection"), ("h", "Sōwilō", "s", "ᛊ", "elder_sowilo", "Sun"),
-            ("t", "Tīwaz", "t", "ᛏ", "elder_tiwaz", "The god Tīwaz"), ("t", "Berkanan", "b", "ᛒ", "elder_berkanan", "Birch"), ("t", "Ehwaz", "e", "ᛖ", "elder_ehwaz", "Horse"),
-            ("t", "Mannaz", "m", "ᛗ", "elder_mannaz", "Man"), ("t", "Laguz", "l", "ᛚ", "elder_laguz", "Water, lake"), ("t", "Ingwaz", "ŋ", "ᛜ", "elder_ingwaz", "The god Ingwaz"),
-            ("t", "Dagaz", "d", "ᛞ", "elder_dagaz", "Day"), ("t", "Ōþala", "o", "ᛟ", "elder_othala", "Heritage, estate"),
+            ("f", "Fehu", "f", "ᚠ", "elder_fehu", "Cattle, wealth", "Stands for riches."), ("f", "Ūruz", "u", "ᚢ", "elder_uruz", "Aurochs", "Stands for strength of will."), ("f", "Þurisaz", "þ", "ᚦ", "elder_thurisaz", "Giant", "Stands for danger and hardship."),
+            ("f", "Ansuz", "a", "ᚨ", "elder_ansuz", "God", "Stands for vitality."), ("f", "Raidō", "r", "ᚱ", "elder_raido", "Ride, journey", "Stands for travel and effort."), ("f", "Kauną", "k", "ᚲ", "elder_kauna", "Ulcer, or torch", "Stands for pain."),
+            ("f", "Gebō", "g", "ᚷ", "elder_gebo", "Gift", "Stands for generosity."), ("f", "Wunjō", "w", "ᚹ", "elder_wunjo", "Joy", "Stands for delight."),
+            ("h", "Hagalaz", "h", "ᚺ", "elder_hagalaz", "Hail", "Stands for ruin and disorder."), ("h", "Naudiz", "n", "ᚾ", "elder_naudiz", "Need", "Stands for want."), ("h", "Īsaz", "i", "ᛁ", "elder_isaz", "Ice", "What it stood for is unclear; the sources disagree."),
+            ("h", "Jēra", "j", "ᛃ", "elder_jera", "Year, harvest", "Stands for harvest and reward."), ("h", "Ī(h)waz", "ï", "ᛇ", "elder_ihwaz", "Yew tree", "Stands for strength and steadiness."), ("h", "Perþō", "p", "ᛈ", "elder_pertho", "Meaning unknown, perhaps pear tree", "What it stood for is lost."),
+            ("h", "Algiz", "z", "ᛉ", "elder_algiz", "Elk, or protection", "Stands for protection."), ("h", "Sōwilō", "s", "ᛊ", "elder_sowilo", "Sun", "Stands for success and comfort."),
+            ("t", "Tīwaz", "t", "ᛏ", "elder_tiwaz", "The god Tīwaz", "Stands for victory and honour."), ("t", "Berkanan", "b", "ᛒ", "elder_berkanan", "Birch", "Stands for growth and fertility."), ("t", "Ehwaz", "e", "ᛖ", "elder_ehwaz", "Horse", "Stands for trust and companionship."),
+            ("t", "Mannaz", "m", "ᛗ", "elder_mannaz", "Man", "Stands for support."), ("t", "Laguz", "l", "ᛚ", "elder_laguz", "Water, lake", "Stands for the unknown."), ("t", "Ingwaz", "ŋ", "ᛜ", "elder_ingwaz", "The god Ingwaz", "Stands for new beginnings."),
+            ("t", "Dagaz", "d", "ᛞ", "elder_dagaz", "Day", "Stands for hope and happiness."), ("t", "Ōþala", "o", "ᛟ", "elder_othala", "Heritage, estate", "Stands for heritage and tradition."),
         };
 
         internal static readonly List<Rune> All = new List<Rune>();
@@ -44,7 +45,7 @@ namespace PotatoPainter
             for (int i = 0; i < ElderRunes.Length; i++)
             {
                 var r = ElderRunes[i];
-                All.Add(new Rune { Row = Elder, Aett = r.aett, Position = i + 1, Name = r.name, Sound = r.sound, Letter = r.letter, Art = r.art, Meaning = r.meaning });
+                All.Add(new Rune { Row = Elder, Aett = r.aett, Position = i + 1, Name = r.name, Sound = r.sound, Letter = r.letter, Art = r.art, Meaning = r.meaning, Note = r.note });
             }
         }
 
@@ -60,7 +61,8 @@ namespace PotatoPainter
             }
         }
 
-        // The build menu's line under the name: the rune's meaning, nothing else (the user, 2026-10-30).
-        internal static string Describe(Rune rune) => rune.Meaning;
+        // The build menu's text under the name: the rune's meaning, then a short line on what it stood for (the user,
+        // 2026-10-30).
+        internal static string Describe(Rune rune) => rune.Meaning + "\n" + rune.Note;
     }
 }
