@@ -58,6 +58,9 @@ namespace PotatoPainter
         {
             if (!nview || nview.GetZDO() == null) return;
             if (!aimValid || Time.time - aimTime > 1f) { placedWithoutAim = true; return; }
+            // The layer as it is now: the preview's can be stale when the aim hasn't moved since the last paint here
+            // (two paints on one spot both landed on layer 0 in the first test).
+            aimLayer = LayerAt(aim.Center, DefaultSize);
             var zdo = nview.GetZDO();
             zdo.Set(KCenter, aim.Center); zdo.Set(KNormal, aim.Normal); zdo.Set(KUp, aim.Up); zdo.Set(KTree, aim.Tree ? 1 : 0);
             zdo.Set(KSize, DefaultSize); zdo.Set(KColor, new Vector3(Look.RedOchre.r, Look.RedOchre.g, Look.RedOchre.b)); zdo.Set(KLayer, aimLayer);
@@ -113,7 +116,10 @@ namespace PotatoPainter
             var cam = Utils.GetMainCamera();
             if (!cam) return;
             var target = transform.position;
-            if ((target - previewAt).sqrMagnitude < 1e-4f || Time.time - previewTime < 0.1f) return;
+            // Retraced when the aim moves (at most ten times a second), and twice a second when it doesn't, so new paint
+            // nearby (layers) and pieces that load show up in the preview too.
+            bool moved = (target - previewAt).sqrMagnitude >= 1e-4f;
+            if (Time.time - previewTime < (moved ? 0.1f : 0.5f)) return;
             previewAt = target; previewTime = Time.time;
             preview?.Clear();
             var eye = cam.transform.position; var dir = target - eye; float dist = dir.magnitude;

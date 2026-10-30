@@ -2,6 +2,7 @@
 - The Rúnakefli has its own look: an antler-tipped rune stick with ᚱᚢᚾᚨᚲᛖᚠᛚᛁ painted along the shaft, and its own icon.
 - Nine more runes to paint: Raidō, Ūruz, Naudiz, Ansuz, Kauną, Ehwaz, Fehu, Laguz and Īsaz.
 - No placement marker while painting.
+- Painting twice on the same spot stacks the new paint on top instead of flickering into the one below.
 
 ## 0.1.0 (test build, not released)
 - The Rúnakefli, crafted at the workbench, with its own build menu.
