@@ -98,7 +98,9 @@ namespace PotatoPainter
             var sw = Stopwatch.StartNew();
             built = Trace.Build(Frame, Size, Lift, Look.Material(Rune), Col, false, "paint " + Rune.Art);
             nextCheck = Time.time + 2f + Random.value;
-            Plugin.Log.LogInfo($"{Rune.Name} at {Frame.Center:F2}: {built.Sheets} sheets, {built.Hosts.Count} things under it, centre on {(built.CenterHost ? built.CenterHost.name : "nothing")} ({why}, {sw.ElapsedMilliseconds} ms)");
+            Plugin.Log.LogInfo($"{Rune.Name} at {Frame.Center:F2}: {built.Sheets} sheets, {built.Hosts.Count} things under it, centre on {(built.CenterHost ? built.CenterHost.name : "nothing")} ({why}, {sw.ElapsedMilliseconds} ms); "
+                + $"{built.Points - built.Missed} of {built.Points} points found a surface; close up: {(built.Report.Count > 0 ? string.Join("; ", built.Report) : "nothing")}{(built.OnGround ? "; grass left out under it" : "")}");
+            Grass.Set(this, built.OnGround, Frame, Size);
         }
 
         private void Update()
@@ -122,13 +124,16 @@ namespace PotatoPainter
             if (Time.time - previewTime < (moved ? 0.1f : 0.5f)) return;
             previewAt = target; previewTime = Time.time;
             preview?.Clear();
+            // Grass is left out under the preview once the aim rests (a moving aim would remake the grass ten times a second).
+            if (moved) Grass.Clear(this);
             var eye = cam.transform.position; var dir = target - eye; float dist = dir.magnitude;
             if (dist < 0.01f) return;
             aimValid = Trace.Aim(eye, dir / dist, dist + 1.5f, DefaultSize, cam.transform.right, out aim);
             aimTime = Time.time;
-            if (!aimValid) return;
+            if (!aimValid) { Grass.Clear(this); return; }
             aimLayer = LayerAt(aim.Center, DefaultSize);
             preview = Trace.Build(aim, DefaultSize, 0.004f + 0.002f * aimLayer, Look.Material(Rune), Look.RedOchre, true, "preview");
+            if (!moved) Grass.Set(this, preview.OnGround, aim, DefaultSize);
         }
 
         // On top of every loaded paint it overlaps (centres closer than 0.9 x their mean size, probe test 13).
@@ -144,12 +149,14 @@ namespace PotatoPainter
         {
             if (!ghost) return;
             preview?.Clear(); preview = null;
+            Grass.Clear(this);
             previewAt = Vector3.positiveInfinity;
         }
 
         private void OnDestroy()
         {
             if (listed) Loaded.Remove(this);
+            Grass.Clear(this);
             built?.Clear();
             preview?.Clear();
         }

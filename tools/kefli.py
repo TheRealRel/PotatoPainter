@@ -3,6 +3,7 @@
 #    the antler tip up out of the fist (where the hammer's head is), so the game holds it like the hammer.
 #  - runakefli_runes.mesh + runakefli_runes.png: the word painted along the plain shaft on two opposite sides, as its own thin
 #    sheet a little above the wood (the stick's own 128 px texture would make 4 cm runes 4 pixels tall).
+#  - runakefli_halo.png: the word's glow halo (the strokes' outline blurred, strokes left out), drawn on the same sheet.
 # The runes read from the grip toward the tip, each standing across the stick with its top to the reader's left (the
 # text turned a quarter left, like a book spine), as on the old rune sticks.
 #   python3 -I kefli.py conv_dir out_dir rune_png_dir "raido uruz naudiz ansuz kauna ehwaz fehu laguz isaz"
@@ -14,7 +15,11 @@ import trimesh
 conv, out, runes_dir, word = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4].split()
 GRIP_X = -0.17                    # centre of the leather wrap along convert.py's X (from the stick's radius profile)
 AXIS_Y = 0.029                    # the stick's axis height in convert.py's space
-SHAFT = (0.015, 0.18)             # plain wood between the knot band and the antler ferrule, 1 cm clear of both
+PLAIN = (-0.02, 0.195)            # plain wood between the knot band (its bulge ends at -0.025) and the antler ferrule
+CLEAR = 0.01                      # kept clear of both
+WRAP = np.radians(136)            # most a rune may wrap round the stick on each side (0.1.1 had 136 at its tip end)
+GAP = 20                          # px between runes
+TOP, BOTTOM = 8, 248              # rows of the 256 px drawings kept: strokes are rows 29 to 226, the halo needs ~20 more
 LIFT = 0.0006                     # paint 0.6 mm above the wood
 
 def load(p):
@@ -43,26 +48,43 @@ Image.open(f'{conv}/runakefli_d.png').save(f'{out}/runakefli_d.png')
 print(f'stick: {len(I)} triangles, from z {P2[:, 2].min():.3f} to {P2[:, 2].max():.3f} m (hand at 0), '
       f'width {np.ptp(P2[:, 0]) * 100:.1f} x {np.ptp(P2[:, 1]) * 100:.1f} cm')
 
-# The word as one texture: each rune's drawing cut to its strokes, side by side, 24 px apart, 256 px tall (as drawn).
+# The word as one texture: each rune's drawing cut to its strokes, side by side, GAP px apart, rows TOP to BOTTOM.
 tiles = []
 for name in word:
-    a = np.asarray(Image.open(f'{runes_dir}/elder_{name}.png').convert('RGBA'))
+    a = np.asarray(Image.open(f'{runes_dir}/elder_{name}.png').convert('RGBA'))[TOP:BOTTOM]
     cols = np.where(a[..., 3].max(0) > 0)[0]
     tiles.append(a[:, cols.min():cols.max() + 1])
-gap = 24
-width = sum(t.shape[1] for t in tiles) + gap * (len(tiles) + 1)
-W = 1 << int(np.ceil(np.log2(width)))
-sheet = np.zeros((256, W, 4), np.uint8); sheet[..., :3] = 255
-x = (W - width) // 2 + gap
+W = sum(t.shape[1] for t in tiles) + GAP * (len(tiles) + 1); H = BOTTOM - TOP
+sheet = np.zeros((H, W, 4), np.uint8); sheet[..., :3] = 255
+x = GAP
 for t in tiles:
-    sheet[:, x:x + t.shape[1]] = t; x += t.shape[1] + gap
+    sheet[:, x:x + t.shape[1]] = t; x += t.shape[1] + GAP
 Image.fromarray(sheet, 'RGBA').save(f'{out}/runakefli_runes.png')
-print(f'word texture {W}x256, strokes span {width} px')
+# The halo as in probe test 22: alpha blurred (gaussian, sigma 7 px), x 1.6, strokes left out, white under it.
+alpha = sheet[..., 3].astype(float) / 255
+sigma, rad = 7.0, 21
+k = np.exp(-np.arange(-rad, rad + 1) ** 2 / (2 * sigma * sigma)); k /= k.sum()
+blur = np.apply_along_axis(lambda r: np.convolve(r, k, 'same'), 1, alpha)
+blur = np.apply_along_axis(lambda c: np.convolve(c, k, 'same'), 0, blur)
+halo = np.zeros_like(sheet); halo[..., :3] = 255
+halo[..., 3] = np.round(np.clip(blur * 1.6, 0, 1) * (1 - alpha) * 255).astype(np.uint8)
+Image.fromarray(halo, 'RGBA').save(f'{out}/runakefli_halo.png')
+print(f'word texture {W}x{H} (strokes {29 - TOP} px from the top and {BOTTOM - 1 - 226} px from the bottom)')
 
 # The sheet: cast onto the stick from outside, on two opposite sides (facing +x and -x in the hand's space).
 mesh = trimesh.Trimesh(P2, I, process=False)
-z0, z1 = SHAFT[0] - GRIP_X, SHAFT[1] - GRIP_X
-arc = (z1 - z0) * 256.0 / W                  # the texture keeps its proportions: height across the stick
+def radius(z):
+    ring = mesh.vertices[np.abs(mesh.vertices[:, 2] - z) < 0.01]
+    return np.sqrt(ring[:, 0] ** 2 + ring[:, 1] ** 2).max() if len(ring) else 0.02
+# Centred in the plain wood, as large as it can be without wrapping more than WRAP round the stick anywhere along it (the
+# stick narrows toward the tip). The texture keeps its proportions: length = arc x W / H.
+lo, hi = PLAIN[0] + CLEAR - GRIP_X, PLAIN[1] - CLEAR - GRIP_X; mid = (lo + hi) / 2
+arc = (hi - lo) * H / W
+for _ in range(60):
+    half = arc * W / H / 2
+    rmin = min(radius(z) for z in np.linspace(mid - half, mid + half, 25))
+    arc = min((hi - lo) * H / W, WRAP * rmin) * 0.5 + arc * 0.5
+z0, z1 = mid - arc * W / H / 2, mid + arc * W / H / 2
 nz, na = 64, 16
 verts, uvs, nrms, tris = [], [], [], []
 for d in (np.array([1.0, 0, 0]), np.array([-1.0, 0, 0])):
@@ -70,8 +92,7 @@ for d in (np.array([1.0, 0, 0]), np.array([-1.0, 0, 0])):
     start = len(verts); ok = []
     for i in range(nz + 1):
         z = z0 + (z1 - z0) * i / nz
-        ring = mesh.vertices[np.abs(mesh.vertices[:, 2] - z) < 0.01]
-        r = np.sqrt((ring[:, 0]) ** 2 + (ring[:, 1]) ** 2).max() if len(ring) else 0.02
+        r = radius(z)
         for j in range(na + 1):
             s = -arc / 2 + arc * j / na
             th = s / r
@@ -99,5 +120,6 @@ for d in (np.array([1.0, 0, 0]), np.array([-1.0, 0, 0])):
                 tris.append(tr)
 V = np.array(verts); Nn = np.array(nrms); Uv = np.array(uvs); T = np.array(tris, np.int64)
 save(f'{out}/runakefli_runes.mesh', V, Nn, Uv, T)
-print(f'rune sheet: {len(T)} triangles on two sides, {(z1 - z0) * 100:.1f} cm along the shaft, {arc * 100:.1f} cm across '
-      f'(runes about {arc * 198 / 256 * 100:.1f} cm tall)')
+print(f'rune sheet: {len(T)} triangles on two sides, from z {z0:.3f} to {z1:.3f} ({(z1 - z0) * 100:.1f} cm along the shaft, '
+      f'plain wood z {PLAIN[0] - GRIP_X:.3f} to {PLAIN[1] - GRIP_X:.3f}), {arc * 100:.2f} cm across (runes about {arc * 198 / H * 100:.1f} cm tall), '
+      f'wrapping at most {np.degrees(arc / min(radius(z) for z in np.linspace(z0, z1, 25))):.0f} degrees')

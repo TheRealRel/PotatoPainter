@@ -27,6 +27,9 @@ namespace PotatoPainter
         internal Transform CenterHost;
         internal readonly HashSet<int> Hosts = new HashSet<int>();
         internal int Sheets;
+        internal bool OnGround;                                   // some of it lies on the ground (Grass.cs)
+        internal int Points, Missed;                              // grid points, and those that found nothing under them
+        internal readonly List<string> Report = new List<string>();   // per host: points landed and squares kept (close up)
 
         internal void Clear()
         {
@@ -40,7 +43,7 @@ namespace PotatoPainter
             }
             foreach (var o in Objects) if (o) UnityEngine.Object.Destroy(o);
             foreach (var b in Benders) Bend.All.Remove(b);
-            Objects.Clear(); Registered.Clear(); Benders.Clear(); Hosts.Clear(); Sheets = 0; CenterHost = null;
+            Objects.Clear(); Registered.Clear(); Benders.Clear(); Hosts.Clear(); Sheets = 0; CenterHost = null; OnGround = false; Points = Missed = 0; Report.Clear();
         }
     }
 
@@ -130,6 +133,7 @@ namespace PotatoPainter
                         if (d < best) { best = d; owner[i] = k; }
                     }
             }
+            built.Points = count; built.Missed = owner.Count(o => o < 0);
             // The host the centre is painted on: the paint goes when it's destroyed.
             {
                 float best = float.MaxValue;
@@ -187,6 +191,8 @@ namespace PotatoPainter
                             if ((verts[a] - verts[b]).magnitude > cell || (verts[a] - verts[c]).magnitude > cell || (verts[d] - verts[b]).magnitude > cell || (verts[d] - verts[c]).magnitude > cell) continue;
                             tri.AddRange(new[] { a, c, b, b, c, d, a, b, c, b, d, c });   // both faces
                         }
+                    if (lv.Active && lv.Index == 0)
+                        built.Report.Add($"{hosts[k].Root.name}: {Enumerable.Range(0, count).Count(i => owner[i] == k && ok[i])} of {owner.Count(o => o == k)} points landed, {tri.Count / 12} of {grid * grid} squares");
                     if (tri.Count == 0) continue;
 
                     // Trees: bent on the CPU exactly like the bark's triangles, when the bark has no flutter or push and every
@@ -214,6 +220,7 @@ namespace PotatoPainter
                     r.receiveShadows = true;
                     Look.Colour(r, col);
                     built.Objects.Add(go); built.Sheets++;
+                    if (hosts[k].Root.GetComponent<Heightmap>()) built.OnGround = true;
                     if (cpu)
                     {
                         var hm = hostR.GetComponent<MeshFilter>().sharedMesh;

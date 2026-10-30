@@ -10,6 +10,11 @@ namespace PotatoPainter
     internal static class Look
     {
         internal static readonly Color RedOchre = new Color(0.62f, 0.12f, 0.06f, 1f);
+        // Glow colour and strength from probe test 22: ember holds its colour on screen up to strength 1 to 1.5 at night
+        // (223,61,22 at 1); stronger turns white (ACES tonemapping). Halo levels: faint 0.4, medium 0.8, strong 1.6.
+        internal static readonly Color Ember = new Color(1f, 0.267f, 0f, 1f);
+        internal const float HaloFaint = 0.4f;
+        private static Material halo; private static bool haloLooked;
         private static Material leaf;
         private static bool looked;
         private static readonly Dictionary<string, Material> materials = new Dictionary<string, Material>();
@@ -39,12 +44,43 @@ namespace PotatoPainter
             return m;
         }
 
-        // The paint look with any drawing and a fixed colour (the Rúnakefli's own runes).
-        internal static Material Paint(string name, Texture2D tex, Color col)
+        // The paint look with any drawing and a fixed colour (the Rúnakefli's own runes), glowing when glow > 0: emission
+        // like the Mistlands mushrooms, the drawing (_EmissiveTex) times _EmissionColor (probe tests 18 to 22).
+        internal static Material Paint(string name, Texture2D tex, Color col, Color glowCol, float glow)
         {
             if (!Leaf() || !tex) return null;
             var m = new Material(leaf) { name = "PotatoPainter " + name, mainTexture = tex };
             if (m.HasProperty("_Color")) m.SetColor("_Color", col);
+            if (glow > 0f && m.HasProperty("_EmissionColor"))
+            {
+                if (m.HasProperty("_EmissiveTex")) m.SetTexture("_EmissiveTex", tex);
+                m.SetColor("_EmissionColor", glowCol * glow);
+                m.EnableKeyword("_EMISSION");
+                m.globalIlluminationFlags = MaterialGlobalIlluminationFlags.RealtimeEmissive;
+            }
+            return m;
+        }
+
+        // The halo around glowing strokes: a copy of the game's own additive "embers" particle material (shader Particles/
+        // Standard Unlit2) with a blurred outline of the strokes as its texture, drawn on the same sheet. A material built
+        // from that shader by hand drew opaque squares (probe test 21); the copy works (test 22). Colour = glow x level.
+        internal static Material Halo(string name, Texture2D tex, Color col)
+        {
+            if (!haloLooked)
+            {
+                haloLooked = true;
+                const string shader = "Particles/Standard Unlit2";
+                bool Additive(Material x) => x && x.shader && x.shader.name == shader && x.HasProperty("_DstBlend") && x.GetFloat("_DstBlend") == 1f && x.HasProperty("_SrcBlend") && x.GetFloat("_SrcBlend") == 5f;
+                var found = Resources.FindObjectsOfTypeAll<Material>().Where(Additive).ToList();
+                halo = found.FirstOrDefault(x => x.name == "embers")
+                    ?? found.FirstOrDefault(x => x.shaderKeywords.Length == 1 && x.shaderKeywords[0] == "_ALPHABLEND_ON" && x.GetFloat("_SoftParticlesEnabled") == 0f);
+                if (halo) Plugin.Log.LogInfo($"Glow halo: a copy of the game's \"{halo.name}\" material ({found.Count} additive {shader} materials loaded).");
+                else Plugin.Log.LogWarning($"Glow halo off this session: none of the game's additive {shader} materials is loaded ({found.Count} found).");
+            }
+            if (!halo || !tex) return null;
+            var m = new Material(halo) { name = "PotatoPainter halo " + name, mainTexture = tex };
+            var c = col; c.a = 1f;
+            if (m.HasProperty("_Color")) m.SetColor("_Color", c);
             return m;
         }
 

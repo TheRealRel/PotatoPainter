@@ -48,13 +48,27 @@ namespace PotatoPainter
                 go.AddComponent<MeshFilter>().sharedMesh = runes;
                 var r = go.AddComponent<MeshRenderer>();
                 r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
-                // Its own material in red ochre: a per-renderer colour isn't copied when the game copies the tool into
-                // the hand.
+                // Its own material in red ochre, glowing ember at strength 1 with a faint halo: a per-renderer colour isn't
+                // copied when the game copies the tool into the hand.
                 if (!headless)
                 {
                     var tex = LoadTexture("runakefli_runes.png", false);
                     if (tex) { tex.wrapMode = TextureWrapMode.Clamp; Look.KeepCoverage(tex, 0.5f); }
-                    r.sharedMaterial = Look.Paint("runakefli word", tex, Look.RedOchre);
+                    r.sharedMaterial = Look.Paint("runakefli word", tex, Look.RedOchre, Look.Ember, 1f);
+                    var haloTex = LoadTexture("runakefli_halo.png", false);
+                    if (haloTex) { haloTex.wrapMode = TextureWrapMode.Clamp; haloTex.filterMode = FilterMode.Bilinear; }
+                    var haloMat = Look.Halo("runakefli word", haloTex, Look.Ember * Look.HaloFaint);
+                    if (haloMat)
+                    {
+                        var h = new GameObject("runes halo");
+                        h.layer = go.layer;
+                        h.transform.SetParent(attach, false);
+                        h.AddComponent<MeshFilter>().sharedMesh = runes;
+                        var hr = h.AddComponent<MeshRenderer>();
+                        hr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                        hr.receiveShadows = false;
+                        hr.sharedMaterial = haloMat;
+                    }
                 }
             }
 

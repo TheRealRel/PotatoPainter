@@ -1,3 +1,7 @@
+## 0.1.2 (test build, not released)
+- Runes on the ground can be seen now: grass and other ground clutter are left out under them, and come back when the paint is removed. The ground itself isn't changed.
+- The runes on the Rúnakefli glow ember, sit in the middle of the plain wood and are a little larger.
+
 ## 0.1.1 (test build, not released)
 - The Rúnakefli has its own look: an antler-tipped rune stick with ᚱᚢᚾᚨᚲᛖᚠᛚᛁ painted along the shaft, and its own icon.
 - Nine more runes to paint: Raidō, Ūruz, Naudiz, Ansuz, Kauną, Ehwaz, Fehu, Laguz and Īsaz.
