@@ -40,7 +40,8 @@ namespace PotatoPainter
         private bool ghost, listed, placedWithoutAim, repeat;
         private Built built, preview;
         private float nextCheck, previewTime;
-        private Vector3 previewAt = Vector3.positiveInfinity;
+        private Vector3 lastEye = Vector3.positiveInfinity, lastDir;
+        private float visibleCheck = -1f;
 
         private float Lift => 0.004f + 0.002f * Layer;   // layers 2 mm apart, the newest on top (probe test 11)
 
@@ -148,6 +149,7 @@ namespace PotatoPainter
             var sw = Stopwatch.StartNew();
             built = Trace.Build(Frame, Size, Lift, Look.Material(Rune), Col, false, "paint " + Rune.Art);
             nextCheck = Time.time + 2f + Random.value;
+            visibleCheck = Time.time + 1.5f;
             Plugin.Log.LogInfo($"{Rune.Name} at {Frame.Center:F2}: {built.Sheets} sheets, {built.Hosts.Count} things under it, centre on {(built.CenterHost ? built.CenterHost.name : "nothing")} ({why}, {sw.ElapsedMilliseconds} ms); "
                 + $"{built.Points - built.Missed} of {built.Points} points found a surface; close up: {(built.Report.Count > 0 ? string.Join("; ", built.Report) : "nothing")}{(built.OnGround ? "; grass left out under it" : "")}");
             Grass.Set(this, built.OnGround, Frame, Size);
@@ -156,30 +158,53 @@ namespace PotatoPainter
         private void Update()
         {
             if (ghost) { Preview(); return; }
+            if (visibleCheck > 0f && Time.time >= visibleCheck && built != null)
+            {
+                // Test data (0.1.3: ground runes not seen): is each sheet drawn, and what is between the camera and it.
+                visibleCheck = -1f;
+                var cam = Utils.GetMainCamera();
+                foreach (var o in built.Objects)
+                {
+                    var r = o ? o.GetComponent<Renderer>() : null;
+                    if (!r) continue;
+                    string between = "";
+                    if (cam)
+                    {
+                        var c = r.bounds.center; var from = cam.transform.position; var d = c - from;
+                        between = Physics.Raycast(from, d.normalized, out var hit, d.magnitude - 0.02f, Trace.Mask, QueryTriggerInteraction.Ignore)
+                            ? $"; {hit.collider.name} is in front of it, {d.magnitude - hit.distance:0.00} m before it" : "; nothing solid in front of it";
+                    }
+                    Plugin.Log.LogInfo($"{Rune.Name} at {Frame.Center:F2}: sheet {o.name} on layer {LayerMask.LayerToName(o.layer)} under {(o.transform.parent ? o.transform.parent.name : "nothing")}, drawn {(r.isVisible ? "on screen" : "nowhere on screen")}, enabled {r.enabled}, active {o.activeInHierarchy}, bounds centre {r.bounds.center:F2} size {r.bounds.size:F2}, {(cam ? Vector3.Distance(cam.transform.position, r.bounds.center).ToString("0.0") + " m from the camera" : "no camera")}{between}");
+                }
+            }
             if (!HasData || Time.time < nextCheck) return;
             nextCheck = Time.time + 2f;
             // Rebuild when what lies under it changed: something loaded after it, or unloaded, or was replaced.
             if (!Trace.HostIds(Frame.Center, Size).SetEquals(built.Hosts)) Rebuild("what lies under it changed");
         }
 
-        // The ghost: trace the paint where the game put the ghost (its own aim ray hit), at most ten times a second.
+        // The ghost: trace the paint where the crosshair points, at most ten times a second. The aim is the game's own
+        // placement ray (Player.PieceRayTest: from the camera along its forward, 50 m, then within m_maxPlaceDistance of
+        // the player's eye), not the line to the ghost: with snapping the game moves the ghost to a snap point, and a
+        // line through it can miss everything (test 0.1.3: "the aim ray hit nothing" on the user's stone build).
         private void Preview()
         {
             var cam = Utils.GetMainCamera();
             if (!cam) return;
-            var target = transform.position;
+            var eye = cam.transform.position; var dir = cam.transform.forward;
             // Retraced when the aim moves (at most ten times a second), and twice a second when it doesn't, so new paint
             // nearby (layers) and pieces that load show up in the preview too.
-            bool moved = (target - previewAt).sqrMagnitude >= 1e-4f;
+            bool moved = (eye - lastEye).sqrMagnitude >= 1e-4f || Vector3.Angle(dir, lastDir) > 0.05f;
             if (Time.time - previewTime < (moved ? 0.1f : 0.5f)) return;
-            previewAt = target; previewTime = Time.time;
+            lastEye = eye; lastDir = dir; previewTime = Time.time;
             preview?.Clear();
             // Grass is left out under the preview once the aim rests (a moving aim would remake the grass ten times a second).
             if (moved) Grass.Clear(this);
-            var eye = cam.transform.position; var dir = target - eye; float dist = dir.magnitude;
-            if (dist < 0.01f) return;
             bool was = aimValid;
-            aimValid = Trace.Aim(eye, dir / dist, dist + 1.5f, DefaultSize, cam.transform.right, out aim, out var why);
+            aimValid = Trace.Aim(eye, dir, 50f, DefaultSize, cam.transform.right, out aim, out var why);
+            var player = Player.m_localPlayer;
+            if (aimValid && player && Vector3.Distance(player.GetEyePoint(), aim.Center) > player.m_maxPlaceDistance)
+            { aimValid = false; why = $"{Vector3.Distance(player.GetEyePoint(), aim.Center):0.0} m away, farther than you can build ({player.m_maxPlaceDistance:0.0} m)"; }
             aimTime = Time.time;
             // Logged when it changes only (test data: "no preview where I aimed", 0.1.2).
             if (!aimValid && (was || why != aimWhy)) Plugin.Log.LogInfo($"Preview of {Rune?.Name}: nothing to paint where you aim ({why})");
@@ -205,7 +230,7 @@ namespace PotatoPainter
             if (!ghost) return;
             preview?.Clear(); preview = null;
             Grass.Clear(this);
-            previewAt = Vector3.positiveInfinity;
+            lastEye = Vector3.positiveInfinity;
         }
 
         private void OnDestroy()

@@ -1,3 +1,7 @@
+## 0.1.4 (test build, not released)
+- The preview and the paint follow the crosshair, the same aim the game uses for building, so snapping no longer sends it off the surface.
+- Pieces from mods whose models can't be read are painted on their collision shape.
+
 ## 0.1.3 (test build, not released)
 - Grass clears far enough around a rune on the ground that no blades lean over it.
 - Painting the same rune on the same spot again does nothing ("Already painted there"). Piles of the same rune already painted on one spot are cut down to one.

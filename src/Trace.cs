@@ -64,6 +64,7 @@ namespace PotatoPainter
         private sealed class Host
         {
             internal Transform Root;
+            internal string FromColliders;   // set when its drawn models can't be read and its colliders were traced instead
             internal readonly List<Level> Levels = new List<Level>();
             internal readonly List<Surface> Reference = new List<Surface>();   // what is drawn up close right now
         }
@@ -78,7 +79,7 @@ namespace PotatoPainter
             frame = default; why = null;
             if (!Physics.Raycast(eye, dir, out var hit, max, Mask, QueryTriggerInteraction.Ignore)) { why = $"the aim ray hit nothing within {max:0.0} m"; return false; }
             var hosts = Hosts(hit.point, size, hit.collider);
-            if (hosts.Count == 0) { why = $"the aim ray hit {hit.collider.name} (layer {LayerMask.LayerToName(hit.collider.gameObject.layer)}), which has no surface that can be read"; return false; }
+            if (hosts.Count == 0) { why = $"the aim ray hit {hit.collider.name} (layer {LayerMask.LayerToName(hit.collider.gameObject.layer)}, a {hit.collider.GetType().Name} on {RootOf(hit.collider).name}), which has no surface or collider that can be read"; return false; }
             var reference = hosts.SelectMany(h => h.Reference).ToList();
             if (!Cast(reference, eye, dir, hit.distance + 1.5f, default, out var center, out var n, out var aimed, out var aimedTri, out _)) { why = $"the aim ray hit {hit.collider.name}, but none of the drawn surfaces of {string.Join(", ", hosts.Select(h => h.Root.name))} lies on it"; return false; }
             var mat = aimed.TriMat != null ? aimed.TriMat[aimedTri] : null;
@@ -192,7 +193,7 @@ namespace PotatoPainter
                             tri.AddRange(new[] { a, c, b, b, c, d, a, b, c, b, d, c });   // both faces
                         }
                     if (lv.Active && lv.Index == 0)
-                        built.Report.Add($"{hosts[k].Root.name}: {Enumerable.Range(0, count).Count(i => owner[i] == k && ok[i])} of {owner.Count(o => o == k)} points landed, {tri.Count / 12} of {grid * grid} squares");
+                        built.Report.Add($"{hosts[k].Root.name}{(hosts[k].FromColliders != null ? " (its models can't be read; traced on its colliders: " + hosts[k].FromColliders + ")" : "")}: {Enumerable.Range(0, count).Count(i => owner[i] == k && ok[i])} of {owner.Count(o => o == k)} points landed, {tri.Count / 12} of {grid * grid} squares");
                     if (tri.Count == 0) continue;
 
                     // Trees: bent on the CPU exactly like the bark's triangles, when the bark has no flutter or push and every
@@ -341,6 +342,27 @@ namespace PotatoPainter
             return new Surface { V = V.ToArray(), T = T.ToArray(), R = r, TriMat = TM.ToArray(), UV2 = uv2 != null ? U2.ToArray() : null };
         }
 
+        // A collider's surface in world space: a box as its 12 triangles, a mesh collider when its mesh can be read.
+        private static Surface FromCollider(Collider col)
+        {
+            if (col is BoxCollider box)
+            {
+                var m = box.transform.localToWorldMatrix; var c = box.center; var e = box.size * 0.5f;
+                var v = new Vector3[8];
+                for (int i = 0; i < 8; i++)
+                    v[i] = m.MultiplyPoint3x4(c + new Vector3((i & 1) == 0 ? -e.x : e.x, (i & 2) == 0 ? -e.y : e.y, (i & 4) == 0 ? -e.z : e.z));
+                var t = new[] { 0, 2, 1, 1, 2, 3, 4, 5, 6, 5, 7, 6, 0, 1, 4, 1, 5, 4, 2, 6, 3, 3, 6, 7, 0, 4, 2, 2, 4, 6, 1, 3, 5, 3, 7, 5 };
+                return new Surface { V = v, T = t, TriMat = new Material[12] };
+            }
+            if (col is MeshCollider mc && mc.sharedMesh && mc.sharedMesh.isReadable)
+            {
+                var s = FromMesh(mc.sharedMesh, mc.transform);
+                s.TriMat = new Material[s.T.Length / 3];
+                return s;
+            }
+            return null;
+        }
+
         // Our own sheets are never read as part of what they lie on (probe test 8: that made each paint slower and land
         // on the paint before it).
         internal static bool Ours(Renderer r) => r && r.name.StartsWith(Prefix, StringComparison.Ordinal);
@@ -391,6 +413,25 @@ namespace PotatoPainter
                 var lv = new Level { Index = 0, Parent = root, Active = true };
                 foreach (var r in root.GetComponentsInChildren<MeshRenderer>(false)) { if (Snow(r) || Ours(r)) continue; var s = FromRenderer(r); if (s != null) lv.Surfaces.Add(s); }
                 if (lv.Surfaces.Count > 0) { h.Levels.Add(lv); h.Reference.AddRange(lv.Surfaces); }
+            }
+            // Drawn models that can't be read (meshes not marked readable, as in some mods' pieces; test 0.1.3: "hit
+            // collider (layer piece), which has no surface that can be read" on the user's stone build): its colliders
+            // are traced instead, boxes and readable mesh colliders, as one level drawn with the piece.
+            if (h.Reference.Count == 0)
+            {
+                var lv = new Level { Index = 0, Parent = root, Active = true };
+                var kinds = new List<string>();
+                foreach (var col in root.GetComponentsInChildren<Collider>(false))
+                {
+                    if (col.isTrigger || ((1 << col.gameObject.layer) & Mask) == 0 || RootOf(col) != root) continue;
+                    var s = FromCollider(col);
+                    if (s != null) { lv.Surfaces.Add(s); kinds.Add(col.GetType().Name); }
+                }
+                if (lv.Surfaces.Count > 0)
+                {
+                    h.Levels.Add(lv); h.Reference.AddRange(lv.Surfaces);
+                    h.FromColliders = string.Join(", ", kinds.GroupBy(k => k).Select(g => $"{g.Count()} {g.Key}"));
+                }
             }
             return h;
         }
