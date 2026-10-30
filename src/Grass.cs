@@ -23,6 +23,10 @@ namespace PotatoPainter
     {
         // Added to each clutter's reach (wind sway), and how far above or below the paint's surface a root counts.
         internal const float Margin = 0.05f, Depth = 0.75f;
+        // At most this far past the rune's square, so a 0.5 m rune gets a bare square of about 2 m; the biggest clumps
+        // rooted farther out can still lean over its edges (the user, 2026-10-30: "Blades at the edges is fine").
+        // Measured reach without the cap: meadow grass 2.14 m, short meadow grass 1.42 m, vass 3.19 m (test 0.1.3).
+        internal const float ReachCap = 0.75f;
         // Patches marked to be made again reach this far past the rune's square (more than any clutter's reach so far).
         private const float ResetReach = 2.5f;
         private static readonly Dictionary<ClutterSystem.Clutter, float> reach = new Dictionary<ClutterSystem.Clutter, float>();
@@ -116,9 +120,10 @@ namespace PotatoPainter
             }
             float scale = Mathf.Max(c.m_scaleMin, c.m_scaleMax, 0f);
             float tilt = Mathf.Clamp(Mathf.Max(Mathf.Abs(c.m_maxTilt), Mathf.Abs(c.m_minTilt)), 0f, 90f) * Mathf.Deg2Rad;
-            r = (side + height * Mathf.Sin(tilt)) * scale + Margin;
+            float full = (side + height * Mathf.Sin(tilt)) * scale + Margin;
+            r = Mathf.Min(full, ReachCap);
             reach[c] = r;
-            Plugin.Log.LogInfo($"Clutter {c.m_name} ({(prefab ? prefab.name : "no prefab")}): reaches {r:0.00} m from its root ({from}, {side:0.00} m across half, {height:0.00} m tall, random scale {c.m_scaleMin:0.##} to {c.m_scaleMax:0.##}, tilt up to {tilt * Mathf.Rad2Deg:0} degrees)");
+            Plugin.Log.LogInfo($"Clutter {c.m_name} ({(prefab ? prefab.name : "no prefab")}): left out within {r:0.00} m of a ground rune; reaches {full:0.00} m from its root ({from}, {side:0.00} m across half, {height:0.00} m tall, random scale {c.m_scaleMin:0.##} to {c.m_scaleMax:0.##}, tilt up to {tilt * Mathf.Rad2Deg:0} degrees)");
             return r;
         }
 

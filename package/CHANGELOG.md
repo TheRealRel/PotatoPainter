@@ -1,3 +1,7 @@
+## 0.1.6 (test build, not released)
+- Īsaz and Perþō get a line on what they stood for too.
+- The grass cleared around a rune on the ground is about 2 m across; the tallest grass may still lean in at the edges.
+
 ## 0.1.5 (test build, not released)
 - Each rune's tooltip adds a short line on what it stood for.
 
