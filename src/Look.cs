@@ -22,25 +22,25 @@ namespace PotatoPainter
 
         // The rune drawing as a texture: clamped, with mipmaps that keep the share of solid texels at the 0.5 cut-out,
         // so strokes don't thin out and break up at a distance (probe test 15).
-        internal static Texture2D Texture(Rune rune)
+        internal static Texture2D Texture(string art)
         {
-            if (textures.TryGetValue(rune.Art, out var t)) return t;
-            var bytes = Runes.ArtBytes(rune);
+            if (textures.TryGetValue(art, out var t)) return t;
+            var bytes = Runes.ArtBytes(art);
             if (bytes == null) return null;
-            t = new Texture2D(2, 2, TextureFormat.RGBA32, true) { name = "PotatoPainter " + rune.Art, wrapMode = TextureWrapMode.Clamp };
+            t = new Texture2D(2, 2, TextureFormat.RGBA32, true) { name = "PotatoPainter " + art, wrapMode = TextureWrapMode.Clamp };
             ImageConversion.LoadImage(t, bytes);
             KeepCoverage(t, 0.5f);
-            textures[rune.Art] = t;
+            textures[art] = t;
             return t;
         }
 
         // Painted: the leaf look in the paint's own colour (it keeps the leaf's normal map and its snow and rain). Etched: the same, glowing ember at strength 1 like the runes on
         // the Rúnakefli (probe test 22: ember keeps its colour up to 1 to 1.5 at night, whiter above).
-        internal static Material Material(Rune rune, bool etched)
+        internal static Material Material(string art, bool etched)
         {
-            var key = (etched ? "etched " : "") + rune.Art;
+            var key = (etched ? "etched " : "") + art;
             if (materials.TryGetValue(key, out var m)) return m;
-            var tex = Texture(rune);
+            var tex = Texture(art);
             if (!Leaf() || !tex) return null;
             m = etched ? Paint(key, tex, RedOchre, Ember, 1f) : new Material(leaf) { name = "PotatoPainter " + key, mainTexture = tex };
             // Etched runes are lit evenly: no bumps from the beech leaf's own normal map (beech_leaf_n, laid over every
@@ -51,12 +51,12 @@ namespace PotatoPainter
         }
 
         // An etched rune's faint halo, in ember (the Rúnakefli's own halo level).
-        internal static Material HaloFor(Rune rune)
+        internal static Material HaloFor(string art)
         {
-            var key = "halo " + rune.Art;
+            var key = "halo " + art;
             if (materials.TryGetValue(key, out var m)) return m;
-            var tex = Texture(rune);
-            m = tex ? Halo(rune.Art, HaloTexture(tex), Ember * HaloFaint) : null;
+            var tex = Texture(art);
+            m = tex ? Halo(art, HaloTexture(tex), Ember * HaloFaint) : null;
             materials[key] = m;
             return m;
         }
@@ -176,14 +176,14 @@ namespace PotatoPainter
 
         // The build menu icon: the rune in red ochre (brightened to read on the dark menu), 64 px. Etched: in ember, with
         // a faint glow around the strokes, so the two tabs tell apart at a glance.
-        internal static Sprite Icon(Rune rune, bool etched)
+        internal static Sprite Icon(string art, bool etched)
         {
-            var bytes = Runes.ArtBytes(rune);
+            var bytes = Runes.ArtBytes(art);
             if (bytes == null) return null;
             var src = new Texture2D(2, 2, TextureFormat.RGBA32, false);
             ImageConversion.LoadImage(src, bytes);
             const int size = 64;
-            var icon = new Texture2D(size, size, TextureFormat.RGBA32, false) { name = "PotatoPainter icon " + rune.Art };
+            var icon = new Texture2D(size, size, TextureFormat.RGBA32, false) { name = "PotatoPainter icon " + art };
             var tint = etched ? new Color(1f, 0.55f, 0.2f) : new Color(0.86f, 0.34f, 0.18f);
             var a = new float[size * size];
             for (int y = 0; y < size; y++)

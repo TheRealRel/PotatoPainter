@@ -11,7 +11,7 @@ namespace PotatoPainter
     public sealed class Paint : MonoBehaviour, IPlaced
     {
         // Set on each design's prefab; copied to every placed paint and ghost. Etched: the glowing kind (its own prefab).
-        public string Art;
+        public string Id;
         public bool Etched;
 
         internal const float DefaultSize = 0.5f;
@@ -21,12 +21,12 @@ namespace PotatoPainter
         private static readonly int KVersion = "PotatoPainter.Version".GetStableHashCode(), KCenter = "PotatoPainter.Center".GetStableHashCode(),
             KNormal = "PotatoPainter.Normal".GetStableHashCode(), KUp = "PotatoPainter.Up".GetStableHashCode(), KTree = "PotatoPainter.Tree".GetStableHashCode(),
             KSize = "PotatoPainter.Size".GetStableHashCode(), KColor = "PotatoPainter.Color".GetStableHashCode(), KLayer = "PotatoPainter.Layer".GetStableHashCode(),
-            KGlow = "PotatoPainter.Glow".GetStableHashCode();
+            KGlow = "PotatoPainter.Glow".GetStableHashCode(), KStyle = "PotatoPainter.Style".GetStableHashCode();
 
         // The placement ghost's latest aim, read by OnPlaced on the same client right after the game places the piece.
         private static Frame aim; private static bool aimValid; private static float aimTime; private static int aimLayer;
         private static readonly HashSet<string> logged = new HashSet<string>();
-        private static Rune aimRune; private static bool aimEtched; private static float aimSize = DefaultSize; private static Color aimCol, aimGlow;
+        private static Rune aimRune; private static bool aimEtched, aimShort; private static float aimSize = DefaultSize; private static Color aimCol, aimGlow;
 
         // Same rune on the same spot (centres closer than this share of its size, facing the same way): a repeat. Repeats
         // are left out when painting, and piles of them already in the world (test 0.1.2: 5 to 30 per spot, painted while
@@ -35,6 +35,8 @@ namespace PotatoPainter
 
         internal Rune Rune;
         internal Frame Frame; internal float Size; internal Color Col, Glow; internal int Layer;
+        // Younger Futhark runes: painted in the short-twig style (saved as PotatoPainter.Style 1; long-branch is 0).
+        internal bool ShortTwig;
         internal bool HasData;
         internal Transform CenterHost => built?.CenterHost;
 
@@ -52,7 +54,7 @@ namespace PotatoPainter
         private void Awake()
         {
             nview = GetComponent<ZNetView>();
-            Rune = Runes.All.FirstOrDefault(r => r.Art == Art);
+            Rune = Runes.All.FirstOrDefault(r => r.Id == Id);
         }
 
         private void Start()
@@ -73,7 +75,7 @@ namespace PotatoPainter
                 placedWithoutAim = true;
                 return;
             }
-            if (Loaded.Any(p => p && p.HasData && Repeats(p, Rune, Etched, aim, aimSize, aimCol, aimGlow)))
+            if (Loaded.Any(p => p && p.HasData && Repeats(p, Rune, Etched, aimShort, aim, aimSize, aimCol, aimGlow)))
             {
                 repeat = true;
                 return;
@@ -85,6 +87,7 @@ namespace PotatoPainter
             zdo.Set(KCenter, aim.Center); zdo.Set(KNormal, aim.Normal); zdo.Set(KUp, aim.Up); zdo.Set(KTree, aim.Tree ? 1 : 0);
             zdo.Set(KSize, aimSize); zdo.Set(KColor, new Vector3(aimCol.r, aimCol.g, aimCol.b)); zdo.Set(KLayer, aimLayer);
             if (Etched) zdo.Set(KGlow, new Vector3(aimGlow.r, aimGlow.g, aimGlow.b));
+            if (Rune.HasStyles) zdo.Set(KStyle, aimShort ? 1 : 0);
             zdo.Set(KVersion, 1);
             zdo.SetPosition(aim.Center);
             transform.position = aim.Center;
@@ -112,6 +115,7 @@ namespace PotatoPainter
             var g = Etched ? zdo.GetVec3(KGlow, new Vector3(Look.Ember.r, Look.Ember.g, Look.Ember.b)) : Vector3.zero;
             Glow = new Color(g.x, g.y, g.z, 1f);
             Layer = zdo.GetInt(KLayer);
+            ShortTwig = Rune.HasStyles && zdo.GetInt(KStyle) == 1;
             HasData = true;
             if (ClearPile()) return;
             Rebuild();
@@ -122,14 +126,14 @@ namespace PotatoPainter
         internal static string Refusal()
         {
             if (!aimValid || Time.time - aimTime > 1f) return aimEtched ? "$msg_potato_etch_nosurface" : "$msg_potato_paint_nosurface";
-            if (aimRune != null && Loaded.Any(p => p && p.HasData && Repeats(p, aimRune, aimEtched, aim, aimSize, aimCol, aimGlow))) return aimEtched ? "$msg_potato_etch_repeat" : "$msg_potato_paint_repeat";
+            if (aimRune != null && Loaded.Any(p => p && p.HasData && Repeats(p, aimRune, aimEtched, aimShort, aim, aimSize, aimCol, aimGlow))) return aimEtched ? "$msg_potato_etch_repeat" : "$msg_potato_paint_repeat";
             return null;
         }
 
-        // The same rune of the same kind, colour, glow and size on the same spot. A new colour or size over an old one is
-        // allowed: it goes on top.
-        private static bool Repeats(Paint p, Rune rune, bool etched, Frame f, float size, Color col, Color glow) =>
-            p.Rune == rune && p.Etched == etched && Mathf.Abs(p.Size - size) < 0.01f && Near(p.Col, col) && Near(p.Glow, glow)
+        // The same rune of the same kind, style, colour, glow and size on the same spot. A new colour, size or style over an
+        // old one is allowed: it goes on top.
+        private static bool Repeats(Paint p, Rune rune, bool etched, bool shortTwig, Frame f, float size, Color col, Color glow) =>
+            p.Rune == rune && p.Etched == etched && p.ShortTwig == shortTwig && Mathf.Abs(p.Size - size) < 0.01f && Near(p.Col, col) && Near(p.Glow, glow)
             && Vector3.Distance(p.Frame.Center, f.Center) < Mathf.Min(p.Size, size) * RepeatShare && Vector3.Dot(p.Frame.Normal, f.Normal) > 0.9f;
 
         private static bool Near(Color a, Color b) => Mathf.Abs(a.r - b.r) < 0.01f && Mathf.Abs(a.g - b.g) < 0.01f && Mathf.Abs(a.b - b.b) < 0.01f;
@@ -138,7 +142,7 @@ namespace PotatoPainter
         // lowered to just above whatever else lies under it. True when this paint was taken away.
         private bool ClearPile()
         {
-            var pile = Loaded.Where(p => p && p.HasData && Repeats(p, Rune, Etched, Frame, Size, Col, Glow)).ToList();
+            var pile = Loaded.Where(p => p && p.HasData && Repeats(p, Rune, Etched, ShortTwig, Frame, Size, Col, Glow)).ToList();
             if (pile.Count < 2) return false;
             var keep = pile.OrderByDescending(p => p.Layer).First();
             var gone = new HashSet<Paint>(pile.Where(p => p != keep));
@@ -163,7 +167,8 @@ namespace PotatoPainter
         private void Rebuild()
         {
             built?.Clear();
-            built = Trace.Build(Frame, Size, Lift, Look.Material(Rune, Etched), Etched ? Look.HaloFor(Rune) : null, Col, Glow, false, (Etched ? "etch " : "paint ") + Rune.Art);
+            var art = Rune.ArtFor(ShortTwig);
+            built = Trace.Build(Frame, Size, Lift, Look.Material(art, Etched), Etched ? Look.HaloFor(art) : null, Col, Glow, false, (Etched ? "etch " : "paint ") + art);
             nextCheck = Time.time + 2f + Random.value;
             Grass.Set(this, built.OnGround, Frame, Size);
         }
@@ -196,13 +201,14 @@ namespace PotatoPainter
             lastEye = eye; lastDir = dir; lastTurn = turn; lastSettings = Settings.Version; previewTime = Time.time;
             // The panel's settings for this kind (kept until changed).
             float size = Settings.Size; var col = Settings.Colour(Etched); var glow = Settings.GlowFor(Etched);
+            bool shortTwig = Rune.HasStyles && Settings.ShortTwig; var art = Rune.ArtFor(shortTwig);
             preview?.Clear();
             // Grass is left out under the preview once the aim rests, and given back only when the aim leaves that spot
             // (test 0.1.7: the camera's own small movements gave it back and took it again twice a second, remaking four
             // grass patches each time).
             aimValid = Trace.Aim(eye, dir, 50f, size, cam.transform.right, turn, out aim)
                 && (!player || Vector3.Distance(player.GetEyePoint(), aim.Center) <= player.m_maxPlaceDistance);
-            aimTime = Time.time; aimRune = Rune; aimEtched = Etched; aimSize = size; aimCol = col; aimGlow = glow;
+            aimTime = Time.time; aimRune = Rune; aimEtched = Etched; aimShort = shortTwig; aimSize = size; aimCol = col; aimGlow = glow;
             // Test data (0.2.2: "some trees aren't registering"): each object and reason once. Taken out before release.
             if (!aimValid && Trace.WhyHit)
             {
@@ -212,7 +218,7 @@ namespace PotatoPainter
             if (!aimValid) { Grass.Clear(this); ghostGrassAt = null; return; }
             if (ghostGrassAt.HasValue && Vector3.Distance(ghostGrassAt.Value, aim.Center) > 0.25f) { Grass.Clear(this); ghostGrassAt = null; }
             aimLayer = LayerAt(aim.Center, size, null);
-            preview = Trace.Build(aim, size, 0.004f + 0.002f * aimLayer, Look.Material(Rune, Etched), Etched ? Look.HaloFor(Rune) : null, col, glow, true, "preview");
+            preview = Trace.Build(aim, size, 0.004f + 0.002f * aimLayer, Look.Material(art, Etched), Etched ? Look.HaloFor(art) : null, col, glow, true, "preview");
             if (!moved && !ghostGrassAt.HasValue && preview.OnGround) { Grass.Set(this, true, aim, size); ghostGrassAt = aim.Center; }
         }
 

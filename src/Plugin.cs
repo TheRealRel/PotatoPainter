@@ -23,7 +23,7 @@ namespace PotatoPainter
     [NetworkCompatibility(CompatibilityLevel.EveryoneMustHaveMod, VersionStrictness.Minor)]
     public class Plugin : BaseUnityPlugin
     {
-        public const string Id = "potato.painter", Version = "0.3.1";
+        public const string Id = "potato.painter", Version = "0.3.2";
         // Saved in worlds and inventories: never rename.
         public const string ToolPrefab = "potato_runakefli";
         public const string TablePrefab = "_PotatoRunakefliPieceTable";
@@ -41,6 +41,11 @@ namespace PotatoPainter
         internal static ManualLogSource Log;
         internal static PieceTable Table;
         internal static readonly HashSet<Paint> Doomed = new HashSet<Paint>();
+        // The Younger Futhark pieces whose short-twig drawing differs: their menu icons in each style, swapped by the panel's
+        // style switch (ShowTwigIcons).
+        private static readonly Dictionary<string, (Piece piece, Sprite longIcon, Sprite shortIcon)> TwigIcons = new Dictionary<string, (Piece, Sprite, Sprite)>();
+        private static readonly Func<BuildUiPieceButton, Piece> ButtonPiece = AccessTools.MethodDelegate<Func<BuildUiPieceButton, Piece>>(AccessTools.PropertyGetter(typeof(BuildUiPieceButton), "Piece"));
+        private static readonly AccessTools.FieldRef<BuildUiPieceButton, UnityEngine.UI.Image> ButtonIcon = AccessTools.FieldRefAccess<BuildUiPieceButton, UnityEngine.UI.Image>("m_icon");
         internal static readonly AccessTools.FieldRef<Player, PieceTable> BuildPieces = AccessTools.FieldRefAccess<Player, PieceTable>("m_buildPieces");
         private static readonly Func<Player, bool> TakeInput = AccessTools.MethodDelegate<Func<Player, bool>>(AccessTools.Method(typeof(Player), "TakeInput"));
 
@@ -113,7 +118,7 @@ namespace PotatoPainter
                 if (!PrefabManager.Instance.GetPrefab(cost)) Log.LogWarning($"The runes' cost item {cost} wasn't found; it's left out of their cost this session.");
             foreach (var rune in Runes.All)
             {
-                if (Runes.ArtBytes(rune) == null) continue;
+                if (Runes.ArtBytes(rune.Art) == null || (rune.ShortArt != null && Runes.ArtBytes(rune.ShortArt) == null)) continue;
                 foreach (bool etched in new[] { false, true })
                 {
                     var config = new PieceConfig
@@ -126,19 +131,41 @@ namespace PotatoPainter
                     };
                     foreach (var (item, amount) in etched ? EtchedCost : PaintedCost)
                         if (PrefabManager.Instance.GetPrefab(item)) config.AddRequirement(new RequirementConfig(item, amount, 0, true));
-                    if (!GUIManager.IsHeadless()) config.Icon = Look.Icon(rune, etched);
+                    Sprite longIcon = null, shortIcon = null;
+                    if (!GUIManager.IsHeadless())
+                    {
+                        config.Icon = longIcon = Look.Icon(rune.Art, etched);
+                        if (rune.ShortArt != null) shortIcon = Look.Icon(rune.ShortArt, etched);
+                    }
                     var piece = new CustomPiece(etched ? rune.EtchedPrefab : rune.Prefab, true, config);
                     var prefab = piece.PiecePrefab;
                     foreach (var c in prefab.GetComponentsInChildren<Collider>(true)) DestroyImmediate(c);
                     foreach (var r in prefab.GetComponentsInChildren<MeshRenderer>(true)) DestroyImmediate(r);
                     foreach (var f in prefab.GetComponentsInChildren<MeshFilter>(true)) DestroyImmediate(f);
                     var paint = prefab.AddComponent<Paint>();
-                    paint.Art = rune.Art; paint.Etched = etched;
+                    paint.Id = rune.Id; paint.Etched = etched;
                     PieceManager.Instance.AddPiece(piece);
+                    if (longIcon && shortIcon) TwigIcons[prefab.name] = (piece.Piece, longIcon, shortIcon);
                 }
                 added++;
             }
             Log.LogInfo($"Rúnakefli ready: {added} of {Runes.All.Count} runes drawn so far, painted and etched.");
+        }
+
+        // The Younger Futhark's menu icons in the panel's style, on the pieces and on the build menu's buttons showing now
+        // (BuildUiPieceButton.Setup copies Piece.m_icon into the button's m_icon when the grid is laid out).
+        internal static void ShowTwigIcons()
+        {
+            foreach (var entry in TwigIcons.Values)
+                if (entry.piece) entry.piece.m_icon = Settings.ShortTwig ? entry.shortIcon : entry.longIcon;
+            var ui = Hud.instance ? Hud.instance.m_buildUi : null;
+            if (!ui) return;
+            foreach (var button in ui.GetComponentsInChildren<BuildUiPieceButton>(true))
+            {
+                var piece = ButtonPiece(button);
+                var icon = ButtonIcon(button);
+                if (piece && icon && TwigIcons.ContainsKey(Utils.GetPrefabName(piece.gameObject))) icon.sprite = piece.m_icon;
+            }
         }
 
         private void Update()

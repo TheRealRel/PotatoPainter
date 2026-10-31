@@ -23,6 +23,8 @@ namespace PotatoPainter
         private const string SaveKey = "PotatoPainter.Panel";
 
         internal static float PaintH, PaintS, PaintV, EtchH, EtchS, Glow, Size;
+        // The Younger Futhark's style for the next rune: short-twig, or long-branch (false). Not touched by Default.
+        internal static bool ShortTwig;
         // Goes up on every change, so the placement preview redraws.
         internal static int Version;
 
@@ -51,6 +53,7 @@ namespace PotatoPainter
         internal static void Load(Player player)
         {
             Defaults(true, true);
+            ShortTwig = false;
             if (!player || !player.m_customData.TryGetValue(SaveKey, out var text)) return;
             foreach (var entry in text.Split(';'))
             {
@@ -65,6 +68,7 @@ namespace PotatoPainter
                     case "es": EtchS = Mathf.Clamp01(v); break;
                     case "eg": Glow = Mathf.Clamp(v, GlowMin, GlowMax); break;
                     case "sz": Size = Mathf.Clamp(v, SizeMin, SizeMax); break;
+                    case "st": ShortTwig = v >= 0.5f; break;
                 }
             }
             Version++;
@@ -74,7 +78,7 @@ namespace PotatoPainter
         {
             if (!player) return;
             string F(float v) => v.ToString("0.####", CultureInfo.InvariantCulture);
-            player.m_customData[SaveKey] = $"ph={F(PaintH)};ps={F(PaintS)};pv={F(PaintV)};eh={F(EtchH)};es={F(EtchS)};eg={F(Glow)};sz={F(Size)}";
+            player.m_customData[SaveKey] = $"ph={F(PaintH)};ps={F(PaintS)};pv={F(PaintV)};eh={F(EtchH)};es={F(EtchS)};eg={F(Glow)};sz={F(Size)};st={(ShortTwig ? 1 : 0)}";
             Version++;
         }
     }
@@ -91,6 +95,10 @@ namespace PotatoPainter
         private static Image swatch;
         private static bool syncing;
         private static bool? shown;   // the kind the sliders are laid out for (true = etched)
+        private static bool shownYounger;   // the style row is shown (a Younger Futhark tab or rune)
+        private static GameObject styleRow;
+        private static UnityEngine.UI.Text styleValue;
+        private static float baseHeight, styleHeight;
         private static Player loadedFor;
         private static readonly Func<BuildUi, GameObject> CurrentTagButton = HarmonyLib.AccessTools.MethodDelegate<Func<BuildUi, GameObject>>(HarmonyLib.AccessTools.Method(typeof(BuildUi), "GetCurrentTagButton"));
 
@@ -100,7 +108,7 @@ namespace PotatoPainter
             var player = Player.m_localPlayer;
             var hud = Hud.instance;
             // The character's settings, as soon as it is in the world (the preview uses them before the panel opens).
-            if (player && loadedFor != player) { Settings.Load(player); loadedFor = player; }
+            if (player && loadedFor != player) { Settings.Load(player); loadedFor = player; Plugin.ShowTwigIcons(); }
             bool open = player && hud && Plugin.Table && player.InPlaceMode() && Plugin.BuildPieces(player) == Plugin.Table && Hud.IsPieceSelectionVisible();
             if (!open)
             {
@@ -121,8 +129,8 @@ namespace PotatoPainter
                     var cam = panel.GetComponentInParent<Canvas>()?.rootCanvas;
                     Plugin.Log.LogInfo($"Panel open: active {panel.activeInHierarchy}, screen corners {RectTransformUtility.WorldToScreenPoint(cam && cam.renderMode != RenderMode.ScreenSpaceOverlay ? cam.worldCamera : null, corners[0])} to {RectTransformUtility.WorldToScreenPoint(cam && cam.renderMode != RenderMode.ScreenSpaceOverlay ? cam.worldCamera : null, corners[2])} of {Screen.width}x{Screen.height}");
                 }
-                bool etched = EtchedShown(player);
-                if (shown != etched) { shown = etched; Show(etched); }
+                bool etched = EtchedShown(player), younger = YoungerShown(player);
+                if (shown != etched || shownYounger != younger) { shown = etched; shownYounger = younger; Show(etched); }
             }
             catch (Exception e)
             {
@@ -146,10 +154,28 @@ namespace PotatoPainter
             return paint && paint.Etched;
         }
 
-        // Painted: hue, saturation, brightness, size. Etched: hue, saturation, glow, size.
+        // A Younger Futhark tab is open, or (Show All, Recent and the like) a Younger Futhark rune is selected.
+        private static bool YoungerShown(Player player)
+        {
+            var button = Hud.instance && Hud.instance.m_buildUi ? CurrentTagButton(Hud.instance.m_buildUi) : null;
+            var tag = button ? button.GetComponent<BuildUiTagButton>() : null;
+            var name = tag ? (tag.m_displayName ?? "").ToLowerInvariant() : "";
+            if (name.Contains("younger")) return true;
+            if (name.Contains("elder") || name.Contains("futhorc")) return false;
+            var piece = player.GetSelectedPiece();
+            var paint = piece ? piece.GetComponent<Paint>() : null;
+            return paint && paint.Rune != null && paint.Rune.HasStyles;
+        }
+
+        // Painted: hue, saturation, brightness, size. Etched: hue, saturation, glow, size. Younger Futhark: the style too.
         private static void Show(bool etched)
         {
             title.text = etched ? "Etched" : "Painted";
+            styleRow.SetActive(shownYounger);
+            if (styleValue) styleValue.text = Settings.ShortTwig ? "Short-twig" : "Long-branch";
+            var rect = (RectTransform)panel.transform;
+            rect.sizeDelta = new Vector2(rect.sizeDelta.x, baseHeight + (shownYounger ? styleHeight : 0f));
+            Fit();
             string[] names = etched ? new[] { "Hue", "Saturation", "Glow", "Size" } : new[] { "Hue", "Saturation", "Brightness", "Size" };
             syncing = true;
             for (int i = 0; i < 4; i++) rows[i].Label.text = names[i];
@@ -202,6 +228,15 @@ namespace PotatoPainter
             row.Strip.Apply(false);
         }
 
+        // The style button: long-branch and short-twig in turn, for the preview, the next rune and the menu's icons.
+        private static void ToggleStyle()
+        {
+            Settings.ShortTwig = !Settings.ShortTwig;
+            Settings.Save(Player.m_localPlayer);
+            if (styleValue) styleValue.text = Settings.ShortTwig ? "Short-twig" : "Long-branch";
+            Plugin.ShowTwigIcons();
+        }
+
         private static void Reset()
         {
             if (shown == null) return;
@@ -231,6 +266,7 @@ namespace PotatoPainter
             if (source && canvas && ((RectTransform)source.transform).rect.width < ((RectTransform)canvas.transform).rect.width * 0.8f) window = (RectTransform)source.transform;
             const float width = 340f, pad = 16f, labelWidth = 96f, valueWidth = 58f, rowHeight = 34f;
             float height = pad + 34f + rowHeight * 4f + 50f + pad;
+            baseHeight = height; styleHeight = 46f;
 
             panel = new GameObject("PotatoPainter_Panel", typeof(RectTransform));
             var rect = (RectTransform)panel.transform;
@@ -288,6 +324,25 @@ namespace PotatoPainter
             reset.name = "PotatoPainter_Default";
             Place((RectTransform)reset.transform, width - pad - 130f, y + 6f, 130f, 36f);
             reset.GetComponent<Button>().onClick.AddListener(Reset);
+
+            // The Younger Futhark's style: a label and a button that switches long-branch and short-twig, below the rest
+            // (shown only for the Younger Futhark; the panel grows by this row then).
+            styleRow = new GameObject("PotatoPainter_Style", typeof(RectTransform));
+            styleRow.layer = panel.layer;
+            styleRow.transform.SetParent(rect, false);
+            Place((RectTransform)styleRow.transform, 0f, y + 50f, width, styleHeight);
+            var styleLabel = Text(textSource, "StyleLabel", pad, y + 56f, labelWidth, 26f);
+            styleLabel.transform.SetParent(styleRow.transform, true);
+            styleLabel.alignment = TextAlignmentOptions.Left;
+            styleLabel.text = "Style";
+            var styleButton = GUIManager.Instance.CreateButton("Long-branch", rect, new Vector2(0f, 1f), new Vector2(0f, 1f), Vector2.zero, 180f, 36f);
+            styleButton.name = "PotatoPainter_StyleButton";
+            Place((RectTransform)styleButton.transform, width - pad - 180f, y + 52f, 180f, 36f);
+            styleButton.transform.SetParent(styleRow.transform, true);
+            styleButton.GetComponent<Button>().onClick.AddListener(ToggleStyle);
+            // Jötunn's buttons carry a plain UI Text (GUIManager.CreateButton), like the Default button.
+            styleValue = styleButton.GetComponentInChildren<UnityEngine.UI.Text>(true);
+            styleRow.SetActive(false);
             panel.SetActive(false);
             // Test data (0.2.1: panel not seen): where it was put. Taken out before release.
             string Path(Transform t) { var parts = new List<string>(); for (; t; t = t.parent) parts.Insert(0, t.name); return string.Join("/", parts); }

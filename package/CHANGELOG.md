@@ -1,3 +1,7 @@
+## 0.3.2 (test build, not released)
+- The Younger Futhark (16 runes) and the Anglo-Saxon futhorc (28 runes and its 6 later additions), painted and etched, each in its own tabs.
+- A Style button on the panel for the Younger Futhark switches between long-branch and short-twig runes.
+
 ## 0.3.1 (test build, not released)
 - No support colours on built pieces while painting runes: paint doesn't hold anything up.
 
