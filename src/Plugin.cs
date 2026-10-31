@@ -23,7 +23,7 @@ namespace PotatoPainter
     [NetworkCompatibility(CompatibilityLevel.EveryoneMustHaveMod, VersionStrictness.Minor)]
     public class Plugin : BaseUnityPlugin
     {
-        public const string Id = "potato.painter", Version = "0.3.0";
+        public const string Id = "potato.painter", Version = "0.3.1";
         // Saved in worlds and inventories: never rename.
         public const string ToolPrefab = "potato_runakefli";
         public const string TablePrefab = "_PotatoRunakefliPieceTable";
@@ -193,6 +193,21 @@ namespace PotatoPainter
                 if (___m_placementStatus != Player.PlacementStatus.Valid) return;
                 refused = Paint.Refusal();
                 if (refused != null) ___m_placementStatus = Player.PlacementStatus.Invalid;
+            }
+        }
+
+        // No support colours with the Rúnakefli: in build mode the game tints the piece under the crosshair by how well it is
+        // supported (Player.UpdateWearNTearHover: raycast, then WearNTear.Highlight), which means nothing for paint (the
+        // user, 2026-10-30). Skipped while the Rúnakefli's table is active, leaving m_hoveringPiece null as the game does
+        // outside build mode.
+        [HarmonyPatch(typeof(Player), "UpdateWearNTearHover")]
+        internal static class NoSupportColours
+        {
+            private static bool Prefix(Player __instance, ref Piece ___m_hoveringPiece)
+            {
+                if (!Table || BuildPieces(__instance) != Table) return true;
+                ___m_hoveringPiece = null;
+                return false;
             }
         }
 

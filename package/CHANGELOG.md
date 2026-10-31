@@ -1,3 +1,6 @@
+## 0.3.1 (test build, not released)
+- No support colours on built pieces while painting runes: paint doesn't hold anything up.
+
 ## 0.3.0 (test build, not released)
 - All 24 Elder Futhark runes, painted and etched. Jera's two hooks sit side by side.
 - Rune names and descriptions are spelled without the long-vowel marks the game's font can't show (Isaz, Raido, Tiwaz).
