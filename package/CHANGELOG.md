@@ -1,3 +1,6 @@
+## 0.2.3 (test build, not released)
+- Test build: writes why a spot can't be painted to the log.
+
 ## 0.2.2 (test build, not released)
 - The slider panel shows beside the build menu (it was missing).
 - Eight runes have new lines on what they stood for, so none just repeats its meaning.

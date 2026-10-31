@@ -25,6 +25,7 @@ namespace PotatoPainter
 
         // The placement ghost's latest aim, read by OnPlaced on the same client right after the game places the piece.
         private static Frame aim; private static bool aimValid; private static float aimTime; private static int aimLayer;
+        private static readonly HashSet<string> logged = new HashSet<string>();
         private static Rune aimRune; private static bool aimEtched; private static float aimSize = DefaultSize; private static Color aimCol, aimGlow;
 
         // Same rune on the same spot (centres closer than this share of its size, facing the same way): a repeat. Repeats
@@ -202,6 +203,12 @@ namespace PotatoPainter
             aimValid = Trace.Aim(eye, dir, 50f, size, cam.transform.right, turn, out aim)
                 && (!player || Vector3.Distance(player.GetEyePoint(), aim.Center) <= player.m_maxPlaceDistance);
             aimTime = Time.time; aimRune = Rune; aimEtched = Etched; aimSize = size; aimCol = col; aimGlow = glow;
+            // Test data (0.2.2: "some trees aren't registering"): each object and reason once. Taken out before release.
+            if (!aimValid && Trace.WhyHit)
+            {
+                var key = Trace.RootOf(Trace.WhyHit).name + "|" + (Trace.Why ?? "farther than you can build");
+                if (logged.Add(key)) Plugin.Log.LogInfo($"Nothing to paint where you aim: {Trace.Why ?? "farther than you can build"}; {Trace.Describe(Trace.WhyHit)}");
+            }
             if (!aimValid) { Grass.Clear(this); ghostGrassAt = null; return; }
             if (ghostGrassAt.HasValue && Vector3.Distance(ghostGrassAt.Value, aim.Center) > 0.25f) { Grass.Clear(this); ghostGrassAt = null; }
             aimLayer = LayerAt(aim.Center, size, null);

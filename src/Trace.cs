@@ -74,14 +74,19 @@ namespace PotatoPainter
 
         // ------------------------------------------------------------------ aiming
         // Where a paint of this size would go along the ray, as the game draws the surfaces there.
+        // Test data (0.2.2: "some trees aren't registering"): why the aim found nothing, and what was hit. Taken out before
+        // release.
+        internal static string Why; internal static Collider WhyHit;
+
         internal static bool Aim(Vector3 eye, Vector3 dir, float max, float size, Vector3 cameraRight, float turn, out Frame frame)
         {
-            frame = default;
-            if (!Physics.Raycast(eye, dir, out var hit, max, Mask, QueryTriggerInteraction.Ignore)) return false;
+            frame = default; Why = null; WhyHit = null;
+            if (!Physics.Raycast(eye, dir, out var hit, max, Mask, QueryTriggerInteraction.Ignore)) { Why = "the aim ray hit nothing"; return false; }
+            WhyHit = hit.collider;
             var hosts = Hosts(hit.point, size, hit.collider);
-            if (hosts.Count == 0) return false;
+            if (hosts.Count == 0) { Why = "nothing readable on what the aim ray hit"; return false; }
             var reference = hosts.SelectMany(h => h.Reference).ToList();
-            if (!Cast(reference, eye, dir, hit.distance + 1.5f, default, out var center, out var n, out var aimed, out var aimedTri, out _)) return false;
+            if (!Cast(reference, eye, dir, hit.distance + 1.5f, default, out var center, out var n, out var aimed, out var aimedTri, out _)) { Why = $"none of the drawn surfaces of {string.Join(", ", hosts.Select(h => h.Root.name))} lies on the aim ray ({reference.Count} surfaces read)"; return false; }
             var mat = aimed.TriMat != null ? aimed.TriMat[aimedTri] : null;
             frame.Center = center; frame.Normal = n;
             frame.Tree = mat && mat.shader && mat.shader.name == "Custom/Vegetation";
@@ -389,6 +394,33 @@ namespace PotatoPainter
                 return s;
             }
             return null;
+        }
+
+        // Test data: what an object is made of, as the tracer sees it.
+        internal static string Describe(Collider c)
+        {
+            if (!c) return "nothing";
+            var root = RootOf(c);
+            var sb = new System.Text.StringBuilder();
+            sb.Append($"hit {c.name} ({c.GetType().Name}, layer {LayerMask.LayerToName(c.gameObject.layer)}) on {root.name}");
+            foreach (var g in root.GetComponentsInChildren<LODGroup>(true))
+            {
+                var lods = g.GetLODs();
+                sb.Append($"; LODGroup {g.name} ({lods.Length} levels, active {g.gameObject.activeInHierarchy}, has snow {lods.SelectMany(l => l.renderers).Any(r => r && Snow(r))})");
+                for (int i = 0; i < lods.Length; i++)
+                    sb.Append($" L{i}: " + string.Join(", ", lods[i].renderers.Where(r => r).Select(R)));
+            }
+            var loose = root.GetComponentsInChildren<Renderer>(true).Where(r => !root.GetComponentsInChildren<LODGroup>(true).Any(g => g.GetLODs().SelectMany(l => l.renderers).Contains(r))).ToList();
+            if (loose.Count > 0) sb.Append("; outside LOD groups: " + string.Join(", ", loose.Select(R)));
+            sb.Append("; colliders: " + string.Join(", ", root.GetComponentsInChildren<Collider>(true).Select(x => $"{x.name} {x.GetType().Name} {LayerMask.LayerToName(x.gameObject.layer)}{(x.isTrigger ? " trigger" : "")}{(x is MeshCollider mc ? (mc.sharedMesh && mc.sharedMesh.isReadable ? " readable" : " not readable") : "")}")));
+            return sb.ToString();
+        }
+
+        private static string R(Renderer r)
+        {
+            var mf = r.GetComponent<MeshFilter>();
+            var mesh = mf ? mf.sharedMesh : (r as SkinnedMeshRenderer)?.sharedMesh;
+            return $"{r.name} [{(mesh ? mesh.name + (mesh.isReadable ? "" : " NOT READABLE") : "no mesh")}, active {r.gameObject.activeInHierarchy}, {string.Join("/", r.sharedMaterials.Where(m => m).Select(m => m.name + " " + (m.shader ? m.shader.name : "?") + (IsFoliage(m) ? " foliage" : "")))}{(Snow(r) ? ", snow" : "")}]";
         }
 
         // Our own sheets are never read as part of what they lie on (probe test 8: that made each paint slower and land
