@@ -34,14 +34,49 @@ namespace PotatoPainter
             return t;
         }
 
-        internal static Material Material(Rune rune)
+        // Painted: the leaf look in the paint's own colour. Etched: the same, glowing ember at strength 1 like the runes on
+        // the Rúnakefli (probe test 22: ember keeps its colour up to 1 to 1.5 at night, whiter above).
+        internal static Material Material(Rune rune, bool etched)
         {
-            if (materials.TryGetValue(rune.Art, out var m)) return m;
+            var key = (etched ? "etched " : "") + rune.Art;
+            if (materials.TryGetValue(key, out var m)) return m;
             var tex = Texture(rune);
             if (!Leaf() || !tex) return null;
-            m = new Material(leaf) { name = "PotatoPainter " + rune.Art, mainTexture = tex };
-            materials[rune.Art] = m;
+            m = etched ? Paint(key, tex, RedOchre, Ember, 1f) : new Material(leaf) { name = "PotatoPainter " + key, mainTexture = tex };
+            materials[key] = m;
             return m;
+        }
+
+        // An etched rune's faint halo, in ember (the Rúnakefli's own halo level).
+        internal static Material HaloFor(Rune rune)
+        {
+            var key = "halo " + rune.Art;
+            if (materials.TryGetValue(key, out var m)) return m;
+            var tex = Texture(rune);
+            m = tex ? Halo(rune.Art, HaloTexture(tex), Ember * HaloFaint) : null;
+            materials[key] = m;
+            return m;
+        }
+
+        // The halo's texture as in probe test 22: the rune's alpha blurred (gaussian, sigma 7 px of 256, inside the
+        // drawing's margin) x 1.6, with the strokes taken out so it adds nothing on top of them; white under the alpha.
+        private static Texture2D HaloTexture(Texture2D rune)
+        {
+            int w = rune.width, h = rune.height;
+            var src = rune.GetPixels32(0);
+            var a = new float[w * h]; for (int i = 0; i < a.Length; i++) a[i] = src[i].a / 255f;
+            float sigma = 7f * w / 256f; int rad = Mathf.CeilToInt(sigma * 3f);
+            var k = new float[rad * 2 + 1]; float sum = 0f;
+            for (int i = -rad; i <= rad; i++) { k[i + rad] = Mathf.Exp(-i * i / (2f * sigma * sigma)); sum += k[i + rad]; }
+            for (int i = 0; i < k.Length; i++) k[i] /= sum;
+            var tmp = new float[w * h]; var blur = new float[w * h];
+            for (int y = 0; y < h; y++) for (int x = 0; x < w; x++) { float v = 0f; for (int i = -rad; i <= rad; i++) { int xx = x + i; if (xx >= 0 && xx < w) v += a[y * w + xx] * k[i + rad]; } tmp[y * w + x] = v; }
+            for (int y = 0; y < h; y++) for (int x = 0; x < w; x++) { float v = 0f; for (int i = -rad; i <= rad; i++) { int yy = y + i; if (yy >= 0 && yy < h) v += tmp[yy * w + x] * k[i + rad]; } blur[y * w + x] = v; }
+            var outp = new Color32[w * h];
+            for (int i = 0; i < outp.Length; i++) outp[i] = new Color32(255, 255, 255, (byte)Mathf.RoundToInt(Mathf.Clamp01(blur[i] * 1.6f) * (1f - a[i]) * 255f));
+            var t = new Texture2D(w, h, TextureFormat.RGBA32, true) { wrapMode = TextureWrapMode.Clamp, filterMode = FilterMode.Bilinear, name = "PotatoPainter halo " + rune.name };
+            t.SetPixels32(outp); t.Apply(true, false);
+            return t;
         }
 
         // The paint look with any drawing and a fixed colour (the Rúnakefli's own runes), glowing when glow > 0: emission
@@ -126,8 +161,9 @@ namespace PotatoPainter
             t.Apply(false);
         }
 
-        // The build menu icon: the rune in red ochre (brightened to read on the dark menu), 64 px.
-        internal static Sprite Icon(Rune rune)
+        // The build menu icon: the rune in red ochre (brightened to read on the dark menu), 64 px. Etched: in ember, with
+        // a faint glow around the strokes, so the two tabs tell apart at a glance.
+        internal static Sprite Icon(Rune rune, bool etched)
         {
             var bytes = Runes.ArtBytes(rune);
             if (bytes == null) return null;
@@ -135,14 +171,28 @@ namespace PotatoPainter
             ImageConversion.LoadImage(src, bytes);
             const int size = 64;
             var icon = new Texture2D(size, size, TextureFormat.RGBA32, false) { name = "PotatoPainter icon " + rune.Art };
-            var tint = new Color(0.86f, 0.34f, 0.18f);
-            var px = new Color[size * size];
+            var tint = etched ? new Color(1f, 0.55f, 0.2f) : new Color(0.86f, 0.34f, 0.18f);
+            var a = new float[size * size];
             for (int y = 0; y < size; y++)
                 for (int x = 0; x < size; x++)
-                {
-                    float a = src.GetPixelBilinear((x + 0.5f) / size, (y + 0.5f) / size).a;
-                    px[y * size + x] = new Color(tint.r, tint.g, tint.b, a);
-                }
+                    a[y * size + x] = src.GetPixelBilinear((x + 0.5f) / size, (y + 0.5f) / size).a;
+            // Etched glow: the strokes' alpha spread 2 px, at a third, under the strokes.
+            var glow = new float[size * size];
+            if (etched)
+                for (int y = 0; y < size; y++)
+                    for (int x = 0; x < size; x++)
+                    {
+                        float v = 0f, n = 0f;
+                        for (int dy = -2; dy <= 2; dy++)
+                            for (int dx = -2; dx <= 2; dx++)
+                            {
+                                int xx = x + dx, yy = y + dy; float wgt = 1f / (1f + dx * dx + dy * dy); n += wgt;
+                                if (xx >= 0 && xx < size && yy >= 0 && yy < size) v += a[yy * size + xx] * wgt;
+                            }
+                        glow[y * size + x] = Mathf.Clamp01(v / n * 1.5f) * 0.35f;
+                    }
+            var px = new Color[size * size];
+            for (int i = 0; i < px.Length; i++) px[i] = new Color(tint.r, tint.g, tint.b, Mathf.Max(a[i], glow[i]));
             icon.SetPixels(px); icon.Apply(false);
             Object.Destroy(src);
             return Sprite.Create(icon, new Rect(0, 0, size, size), new Vector2(0.5f, 0.5f));

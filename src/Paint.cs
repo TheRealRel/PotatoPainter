@@ -10,8 +10,9 @@ namespace PotatoPainter
 {
     public sealed class Paint : MonoBehaviour, IPlaced
     {
-        // Set on each design's prefab; copied to every placed paint and ghost.
+        // Set on each design's prefab; copied to every placed paint and ghost. Etched: the glowing kind (its own prefab).
         public string Art;
+        public bool Etched;
 
         internal const float DefaultSize = 0.5f;
         internal static readonly List<Paint> Loaded = new List<Paint>();
@@ -23,6 +24,7 @@ namespace PotatoPainter
 
         // The placement ghost's latest aim, read by OnPlaced on the same client right after the game places the piece.
         private static Frame aim; private static bool aimValid; private static float aimTime; private static int aimLayer;
+        private static Rune aimRune; private static bool aimEtched;
 
         // Same rune on the same spot (centres closer than this share of its size, facing the same way): a repeat. Repeats
         // are left out when painting, and piles of them already in the world (test 0.1.2: 5 to 30 per spot, painted while
@@ -69,7 +71,7 @@ namespace PotatoPainter
                 placedWithoutAim = true;
                 return;
             }
-            if (Loaded.Any(p => p && p.HasData && Repeats(p, Rune, aim, DefaultSize)))
+            if (Loaded.Any(p => p && p.HasData && Repeats(p, Rune, Etched, aim, DefaultSize)))
             {
                 repeat = true;
                 return;
@@ -93,8 +95,8 @@ namespace PotatoPainter
                 // Nothing to paint (placed where nothing could be traced): its owner takes it away again.
                 if (nview.IsOwner())
                 {
-                    if (repeat) Player.m_localPlayer?.Message(MessageHud.MessageType.Center, "$msg_potato_paint_repeat");
-                    else if (placedWithoutAim) Player.m_localPlayer?.Message(MessageHud.MessageType.Center, "$msg_potato_paint_nosurface");
+                    if (repeat) Player.m_localPlayer?.Message(MessageHud.MessageType.Center, Etched ? "$msg_potato_etch_repeat" : "$msg_potato_paint_repeat");
+                    else if (placedWithoutAim) Player.m_localPlayer?.Message(MessageHud.MessageType.Center, Etched ? "$msg_potato_etch_nosurface" : "$msg_potato_paint_nosurface");
                     ZNetScene.instance.Destroy(gameObject);
                 }
                 return;
@@ -109,14 +111,23 @@ namespace PotatoPainter
             Rebuild();
         }
 
-        private static bool Repeats(Paint p, Rune rune, Frame f, float size) =>
-            p.Rune == rune && Vector3.Distance(p.Frame.Center, f.Center) < Mathf.Min(p.Size, size) * RepeatShare && Vector3.Dot(p.Frame.Normal, f.Normal) > 0.9f;
+        // Why the game must not place the selected rune where the ghost's preview is right now, or null when it may (read
+        // by Plugin's placement check, so a click that can't paint takes nothing).
+        internal static string Refusal()
+        {
+            if (!aimValid || Time.time - aimTime > 1f) return aimEtched ? "$msg_potato_etch_nosurface" : "$msg_potato_paint_nosurface";
+            if (aimRune != null && Loaded.Any(p => p && p.HasData && Repeats(p, aimRune, aimEtched, aim, DefaultSize))) return aimEtched ? "$msg_potato_etch_repeat" : "$msg_potato_paint_repeat";
+            return null;
+        }
+
+        private static bool Repeats(Paint p, Rune rune, bool etched, Frame f, float size) =>
+            p.Rune == rune && p.Etched == etched && Vector3.Distance(p.Frame.Center, f.Center) < Mathf.Min(p.Size, size) * RepeatShare && Vector3.Dot(p.Frame.Normal, f.Normal) > 0.9f;
 
         // A pile of the same rune on one spot: the top one stays, the rest are taken away for everyone, and the one kept is
         // lowered to just above whatever else lies under it. True when this paint was taken away.
         private bool ClearPile()
         {
-            var pile = Loaded.Where(p => p && p.HasData && Repeats(p, Rune, Frame, Size)).ToList();
+            var pile = Loaded.Where(p => p && p.HasData && Repeats(p, Rune, Etched, Frame, Size)).ToList();
             if (pile.Count < 2) return false;
             var keep = pile.OrderByDescending(p => p.Layer).First();
             var gone = new HashSet<Paint>(pile.Where(p => p != keep));
@@ -141,7 +152,7 @@ namespace PotatoPainter
         private void Rebuild()
         {
             built?.Clear();
-            built = Trace.Build(Frame, Size, Lift, Look.Material(Rune), Col, false, "paint " + Rune.Art);
+            built = Trace.Build(Frame, Size, Lift, Look.Material(Rune, Etched), Etched ? Look.HaloFor(Rune) : null, Col, false, (Etched ? "etch " : "paint ") + Rune.Art);
             nextCheck = Time.time + 2f + Random.value;
             Grass.Set(this, built.OnGround, Frame, Size);
         }
@@ -178,11 +189,11 @@ namespace PotatoPainter
             // grass patches each time).
             aimValid = Trace.Aim(eye, dir, 50f, DefaultSize, cam.transform.right, turn, out aim)
                 && (!player || Vector3.Distance(player.GetEyePoint(), aim.Center) <= player.m_maxPlaceDistance);
-            aimTime = Time.time;
+            aimTime = Time.time; aimRune = Rune; aimEtched = Etched;
             if (!aimValid) { Grass.Clear(this); ghostGrassAt = null; return; }
             if (ghostGrassAt.HasValue && Vector3.Distance(ghostGrassAt.Value, aim.Center) > 0.25f) { Grass.Clear(this); ghostGrassAt = null; }
             aimLayer = LayerAt(aim.Center, DefaultSize, null);
-            preview = Trace.Build(aim, DefaultSize, 0.004f + 0.002f * aimLayer, Look.Material(Rune), Look.RedOchre, true, "preview");
+            preview = Trace.Build(aim, DefaultSize, 0.004f + 0.002f * aimLayer, Look.Material(Rune, Etched), Etched ? Look.HaloFor(Rune) : null, Look.RedOchre, true, "preview");
             if (!moved && !ghostGrassAt.HasValue && preview.OnGround) { Grass.Set(this, true, aim, DefaultSize); ghostGrassAt = aim.Center; }
         }
 
@@ -198,6 +209,7 @@ namespace PotatoPainter
         private void OnDisable()
         {
             if (!ghost) return;
+            aimValid = false;
             preview?.Clear(); preview = null;
             Grass.Clear(this); ghostGrassAt = null;
             lastEye = Vector3.positiveInfinity;

@@ -100,8 +100,9 @@ namespace PotatoPainter
 
         // ------------------------------------------------------------------ building
         // Traces the paint on everything under it. preview: only what is drawn up close right now, in world space, not
-        // added to the game's model switching (the placement ghost).
-        internal static Built Build(Frame f, float size, float lift, Material material, Color col, bool preview, string name)
+        // added to the game's model switching (the placement ghost). halo: drawn again on the same sheet with it (etched
+        // runes, the way probe test 22 drew it), or null.
+        internal static Built Build(Frame f, float size, float lift, Material material, Material halo, Color col, bool preview, string name)
         {
             var built = new Built();
             var hosts = Hosts(f.Center, size, null);
@@ -221,6 +222,19 @@ namespace PotatoPainter
                     r.receiveShadows = true;
                     Look.Colour(r, col);
                     built.Objects.Add(go); built.Sheets++;
+                    MeshRenderer hr = null;
+                    if (halo)
+                    {
+                        var hg = new GameObject(Prefix + name + " halo LOD" + lv.Index);
+                        hg.layer = go.layer;
+                        if (parent) hg.transform.SetParent(parent, false);
+                        hg.AddComponent<MeshFilter>().sharedMesh = mesh;
+                        hr = hg.AddComponent<MeshRenderer>();
+                        hr.sharedMaterial = halo;
+                        hr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                        hr.receiveShadows = false;
+                        built.Objects.Add(hg);
+                    }
                     var groundHm = hosts[k].Root.GetComponent<Heightmap>();
                     if (groundHm)
                     {
@@ -251,9 +265,10 @@ namespace PotatoPainter
                     if (!preview && lv.Group)
                     {
                         var lods = lv.Group.GetLODs();
-                        lods[lv.Index].renderers = lods[lv.Index].renderers.Concat(new Renderer[] { r }).ToArray();
+                        lods[lv.Index].renderers = lods[lv.Index].renderers.Concat(hr ? new Renderer[] { r, hr } : new Renderer[] { r }).ToArray();
                         lv.Group.SetLODs(lods);
                         built.Registered.Add((lv.Group, lv.Index, r));
+                        if (hr) built.Registered.Add((lv.Group, lv.Index, hr));
                     }
                 }
             }

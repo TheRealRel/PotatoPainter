@@ -1,3 +1,8 @@
+## 0.2.0 (test build, not released)
+- Every rune comes two ways, each in its own tab of the Rúnakefli's menu: Elder Futhark: Painted, and Elder Futhark: Etched, which glows ember with a faint halo.
+- A painted rune costs 1 Coal; an etched one 1 Coal and 1 Resin. Taking a rune away with the Rúnakefli gives them back.
+- A click where nothing can be painted, or on the same rune already there, does nothing and costs nothing.
+
 ## 0.1.9 (test build, not released)
 - The preview does less work while you aim, and PotatoPainter no longer fills the game's log with test lines.
 

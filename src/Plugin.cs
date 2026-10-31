@@ -23,7 +23,7 @@ namespace PotatoPainter
     [NetworkCompatibility(CompatibilityLevel.EveryoneMustHaveMod, VersionStrictness.Minor)]
     public class Plugin : BaseUnityPlugin
     {
-        public const string Id = "potato.painter", Version = "0.1.9";
+        public const string Id = "potato.painter", Version = "0.2.0";
         // Saved in worlds and inventories: never rename.
         public const string ToolPrefab = "potato_runakefli";
         public const string TablePrefab = "_PotatoRunakefliPieceTable";
@@ -31,6 +31,12 @@ namespace PotatoPainter
         // The Rúnakefli's recipe (the user's, 2026-10-30), at the workbench.
         private static readonly (string item, int amount)[] Recipe =
             { ("HardAntler", 1), ("ElderBark", 5), ("Raspberry", 10), ("Blueberries", 10), ("WitheredBone", 3) };
+        // What a rune costs (the user, 2026-10-30): Coal for the paint (soot and charcoal were real rune paints), and Resin
+        // as well for an etched one, which glows. Given back when the Rúnakefli takes the rune away again.
+        private static readonly (string item, int amount)[] PaintedCost = { ("Coal", 1) };
+        private static readonly (string item, int amount)[] EtchedCost = { ("Coal", 1), ("Resin", 1) };
+        // Set by the placement check when the spot was refused: the message to show for it.
+        private static string refused;
 
         internal static ManualLogSource Log;
         internal static PieceTable Table;
@@ -51,10 +57,12 @@ namespace PotatoPainter
             var words = new Dictionary<string, string>
             {
                 { "item_potato_runakefli", "Rúnakefli" },
-                { "item_potato_runakefli_description", "A carved rune stick with pigment of berries, bark and bone. Paints runes onto walls, floors, rocks, trees and the ground. Middle mouse takes a paint away again." },
+                { "item_potato_runakefli_description", "A carved rune stick with pigment of berries, bark and bone. Paints runes onto walls, floors, rocks, trees and the ground, or etches them to glow. Middle mouse takes a rune away again." },
                 { "msg_potato_paint_nosurface", "Nothing to paint on there" },
                 { "msg_potato_paint_removed", "Paint removed" },
                 { "msg_potato_paint_repeat", "Already painted there" },
+                { "msg_potato_etch_nosurface", "Nothing to etch there" },
+                { "msg_potato_etch_repeat", "Already etched there" },
             };
             foreach (var rune in Runes.All)
             {
@@ -96,33 +104,41 @@ namespace PotatoPainter
             ItemManager.Instance.AddItem(tool);
         }
 
-        // One piece per drawn design, free to paint for now. The piece has no model and no collider: Jötunn's empty prefab
-        // is a cube (box collider, mesh), so those go.
+        // Two pieces per drawn design, each kind in its own tab: painted, and etched (glows). The piece has no model and no
+        // collider: Jötunn's empty prefab is a cube (box collider, mesh), so those go.
         private static void AddRunes()
         {
             int added = 0;
+            foreach (var cost in PaintedCost.Concat(EtchedCost).Select(c => c.item).Distinct())
+                if (!PrefabManager.Instance.GetPrefab(cost)) Log.LogWarning($"The runes' cost item {cost} wasn't found; it's left out of their cost this session.");
             foreach (var rune in Runes.All)
             {
                 if (Runes.ArtBytes(rune) == null) continue;
-                var config = new PieceConfig
+                foreach (bool etched in new[] { false, true })
                 {
-                    Name = "$" + rune.NameToken,
-                    Description = "$" + rune.DescriptionToken,
-                    PieceTable = TablePrefab,
-                    Category = rune.Row,
-                    AllowedInDungeons = false,
-                };
-                if (!GUIManager.IsHeadless()) config.Icon = Look.Icon(rune);
-                var piece = new CustomPiece(rune.Prefab, true, config);
-                var prefab = piece.PiecePrefab;
-                foreach (var c in prefab.GetComponentsInChildren<Collider>(true)) DestroyImmediate(c);
-                foreach (var r in prefab.GetComponentsInChildren<MeshRenderer>(true)) DestroyImmediate(r);
-                foreach (var f in prefab.GetComponentsInChildren<MeshFilter>(true)) DestroyImmediate(f);
-                prefab.AddComponent<Paint>().Art = rune.Art;
-                PieceManager.Instance.AddPiece(piece);
+                    var config = new PieceConfig
+                    {
+                        Name = "$" + rune.NameToken,
+                        Description = "$" + rune.DescriptionToken,
+                        PieceTable = TablePrefab,
+                        Category = rune.Tab(etched),
+                        AllowedInDungeons = false,
+                    };
+                    foreach (var (item, amount) in etched ? EtchedCost : PaintedCost)
+                        if (PrefabManager.Instance.GetPrefab(item)) config.AddRequirement(new RequirementConfig(item, amount, 0, true));
+                    if (!GUIManager.IsHeadless()) config.Icon = Look.Icon(rune, etched);
+                    var piece = new CustomPiece(etched ? rune.EtchedPrefab : rune.Prefab, true, config);
+                    var prefab = piece.PiecePrefab;
+                    foreach (var c in prefab.GetComponentsInChildren<Collider>(true)) DestroyImmediate(c);
+                    foreach (var r in prefab.GetComponentsInChildren<MeshRenderer>(true)) DestroyImmediate(r);
+                    foreach (var f in prefab.GetComponentsInChildren<MeshFilter>(true)) DestroyImmediate(f);
+                    var paint = prefab.AddComponent<Paint>();
+                    paint.Art = rune.Art; paint.Etched = etched;
+                    PieceManager.Instance.AddPiece(piece);
+                }
                 added++;
             }
-            Log.LogInfo($"Rúnakefli ready: {added} of {Runes.All.Count} runes drawn so far.");
+            Log.LogInfo($"Rúnakefli ready: {added} of {Runes.All.Count} runes drawn so far, painted and etched.");
         }
 
         private void Update()
@@ -156,18 +172,37 @@ namespace PotatoPainter
             if (!PrivateArea.CheckAccess(at, 0f, true, false)) { player.Message(MessageHud.MessageType.Center, "$msg_privatezone"); return; }
             var piece = target.GetComponent<Piece>();
             if (piece && !piece.CanBeRemoved()) { player.Message(MessageHud.MessageType.Center, "$msg_cantremovenow"); return; }
+            // Its Coal and Resin back, as the hammer gives back a piece's (Player.RemovePiece: Piece.DropResources).
+            if (piece) piece.DropResources();
             target.Delete();
             player.Message(MessageHud.MessageType.TopLeft, "$msg_potato_paint_removed");
         }
 
-        // No placement marker (the game's yellow outline and arrow) with the Rúnakefli: the paint's own preview shows where
-        // it goes. UpdatePlacementGhost turns the marker on every frame it's valid, so it's hidden after it, each frame.
+        // With the Rúnakefli: no placement marker (the game's yellow outline and arrow; the paint's own preview shows where
+        // it goes), and the spot counts as invalid when nothing can be painted there or the same rune is already there, so
+        // the game doesn't place it and takes nothing. UpdatePlacementGhost turns the marker on every frame it's valid and
+        // sets m_placementStatus; TryPlacePiece calls it, then reads the status before placing (the cost is taken after).
         [HarmonyPatch(typeof(Player), "UpdatePlacementGhost")]
-        internal static class NoPlacementMarker
+        internal static class PlacementCheck
         {
-            private static void Postfix(Player __instance, GameObject ___m_placementMarkerInstance)
+            private static void Postfix(Player __instance, GameObject ___m_placementMarkerInstance, ref Player.PlacementStatus ___m_placementStatus)
             {
-                if (___m_placementMarkerInstance && Table && BuildPieces(__instance) == Table) ___m_placementMarkerInstance.SetActive(false);
+                if (!Table || BuildPieces(__instance) != Table) return;
+                if (___m_placementMarkerInstance) ___m_placementMarkerInstance.SetActive(false);
+                refused = null;
+                if (___m_placementStatus != Player.PlacementStatus.Valid) return;
+                refused = Paint.Refusal();
+                if (refused != null) ___m_placementStatus = Player.PlacementStatus.Invalid;
+            }
+        }
+
+        // A refused click says why, in place of the game's "Invalid placement".
+        [HarmonyPatch(typeof(Player), nameof(Player.TryPlacePiece))]
+        internal static class RefusedMessage
+        {
+            private static void Postfix(Player __instance, bool __result)
+            {
+                if (!__result && refused != null && Table && BuildPieces(__instance) == Table) __instance.Message(MessageHud.MessageType.Center, refused);
             }
         }
 

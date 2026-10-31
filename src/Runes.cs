@@ -11,10 +11,13 @@ namespace PotatoPainter
     {
         internal string Row, Aett, Name, Sound, Letter, Art, Meaning, Note;
         internal int Position;
-        // Saved in worlds (one piece prefab per design): never rename.
+        // Saved in worlds (two piece prefabs per design: painted, and etched, which glows): never rename.
         internal string Prefab => "potato_paint_" + Art;
+        internal string EtchedPrefab => "potato_etch_" + Art;
         internal string NameToken => "piece_" + Prefab;
         internal string DescriptionToken => "piece_" + Prefab + "_description";
+        // The build menu tabs, one pair per row (the user, 2026-10-30): "Elder Futhark: Painted", "Elder Futhark: Etched".
+        internal string Tab(bool etched) => Row + (etched ? ": Etched" : ": Painted");
     }
 
     internal static class Runes
