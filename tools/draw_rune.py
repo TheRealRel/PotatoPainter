@@ -10,6 +10,10 @@ from shapely.ops import unary_union
 src=open(sys.argv[1]).read()
 cut=src.index("def draw(")   # strokes, wobble and outline only (no font building)
 ns={}; exec(src[:cut], ns)
+# PotatoPainter's own changes to PotatoRunes' strokes (PotatoRunes' font stays as it is):
+# Jēra (ᛃ): the lower hook moved up 280 and right 66, so the two hooks sit nested at almost the same height with a clean
+# gap between them (the user's pick "D level" of four layouts, 2026-10-30; the font's version has a big gap between them).
+ns['R'][0x16C3]=[[(170,700),(0,560),(170,420)], [(196,560),(366,420),(196,280)]]
 def render(cp, scale=0.25, size=256, ss=4, stroke=None):
     if stroke: ns['STROKE']=stroke
     g=ns['outline'](cp)
