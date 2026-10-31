@@ -1,3 +1,7 @@
+## 0.2.2 (test build, not released)
+- The slider panel shows beside the build menu (it was missing).
+- Eight runes have new lines on what they stood for, so none just repeats its meaning.
+
 ## 0.2.1 (test build, not released)
 - A panel beside the Rúnakefli's build menu sets the next rune's colour (hue, saturation, brightness) and size (0.25 to 2 m); for etched runes, the glow's colour and strength. It follows the open tab, and your settings stay with your character until you change them. Default puts them back.
 - The preview shows the rune in the colour, size and glow it will have.

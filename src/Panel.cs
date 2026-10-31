@@ -1,4 +1,5 @@
-// The Rúnakefli's panel: beside the build menu while it is open, sliders for the next rune's colour and size, and for an
+// The Rúnakefli's panel: beside the build menu (Valheim 1.0's BuildUi, Hud.m_buildUi; the old m_pieceSelectionWindow is
+// never shown: test 0.2.1 had the panel inside it, unseen) while it is open, sliders for the next rune's colour and size, and for an
 // etched rune its glow. Built like PotatoDye's cape panel (the game's own background and text copied, sliders styled the
 // Valheim way by Jötunn). It follows the menu's open tab (Painted or Etched); settings are kept with the character until
 // changed (the user, 2026-10-30).
@@ -90,8 +91,8 @@ namespace PotatoPainter
         private static Image swatch;
         private static bool syncing;
         private static bool? shown;   // the kind the sliders are laid out for (true = etched)
-        private static Piece.PieceCategory? paintedTab, etchedTab;
         private static Player loadedFor;
+        private static readonly Func<BuildUi, GameObject> CurrentTagButton = HarmonyLib.AccessTools.MethodDelegate<Func<BuildUi, GameObject>>(HarmonyLib.AccessTools.Method(typeof(BuildUi), "GetCurrentTagButton"));
 
         // Every frame (Plugin.LateUpdate): shown while the Rúnakefli's build menu is open.
         internal static void Update()
@@ -115,6 +116,10 @@ namespace PotatoPainter
                     panel.SetActive(true);
                     shown = null;
                     Fit();
+                    // Test data (0.2.1: panel not seen): where it shows on screen. Taken out before release.
+                    var corners = new Vector3[4]; ((RectTransform)panel.transform).GetWorldCorners(corners);
+                    var cam = panel.GetComponentInParent<Canvas>()?.rootCanvas;
+                    Plugin.Log.LogInfo($"Panel open: active {panel.activeInHierarchy}, screen corners {RectTransformUtility.WorldToScreenPoint(cam && cam.renderMode != RenderMode.ScreenSpaceOverlay ? cam.worldCamera : null, corners[0])} to {RectTransformUtility.WorldToScreenPoint(cam && cam.renderMode != RenderMode.ScreenSpaceOverlay ? cam.worldCamera : null, corners[2])} of {Screen.width}x{Screen.height}");
                 }
                 bool etched = EtchedShown(player);
                 if (shown != etched) { shown = etched; Show(etched); }
@@ -127,14 +132,15 @@ namespace PotatoPainter
             }
         }
 
-        // The open tab's kind; with every tab shown (Show All), the kind of the selected rune.
+        // The open sidebar entry's kind (BuildUi.GetCurrentTagButton: its display name is Jötunn's token for the tab,
+        // "$jotunn_cat_elder_futhark__etched", or the tab's name); with Show All, Recent and the like, the selected rune's.
         private static bool EtchedShown(Player player)
         {
-            if (paintedTab == null) paintedTab = PieceManager.Instance.GetPieceCategory(Runes.All[0].Tab(false));
-            if (etchedTab == null) etchedTab = PieceManager.Instance.GetPieceCategory(Runes.All[0].Tab(true));
-            var tab = Plugin.Table.GetSelectedCategory();
-            if (etchedTab.HasValue && tab == etchedTab.Value) return true;
-            if (paintedTab.HasValue && tab == paintedTab.Value) return false;
+            var button = Hud.instance && Hud.instance.m_buildUi ? CurrentTagButton(Hud.instance.m_buildUi) : null;
+            var tag = button ? button.GetComponent<BuildUiTagButton>() : null;
+            var name = tag ? (tag.m_displayName ?? "").ToLowerInvariant() : "";
+            if (name.EndsWith("etched")) return true;
+            if (name.EndsWith("painted")) return false;
             var piece = player.GetSelectedPiece();
             var paint = piece ? piece.GetComponent<Paint>() : null;
             return paint && paint.Etched;
@@ -209,13 +215,20 @@ namespace PotatoPainter
         {
             if (panel) UnityEngine.Object.Destroy(panel);
             panel = null; owner = hud;
-            var window = hud.m_pieceSelectionWindow ? hud.m_pieceSelectionWindow.transform as RectTransform : null;
+            var ui = hud.m_buildUi ? hud.m_buildUi.transform as RectTransform : null;
             var textSource = hud.m_pieceDescription;
-            if (!window || !textSource)
+            if (!ui || !textSource)
             {
                 Plugin.Log.LogWarning("The build menu changed; the Rúnakefli's panel stays off.");
                 return;
             }
+            // The window itself: the build menu's largest picture (its wood background), unless that fills the screen.
+            var canvas = ui.GetComponentInParent<Canvas>()?.rootCanvas;
+            var source = ui.GetComponentsInChildren<Image>(true)
+                .Where(image => image.sprite && !image.GetComponentInParent<Selectable>())
+                .OrderByDescending(image => ((RectTransform)image.transform).rect.width * ((RectTransform)image.transform).rect.height).FirstOrDefault();
+            var window = ui;
+            if (source && canvas && ((RectTransform)source.transform).rect.width < ((RectTransform)canvas.transform).rect.width * 0.8f) window = (RectTransform)source.transform;
             const float width = 340f, pad = 16f, labelWidth = 96f, valueWidth = 58f, rowHeight = 34f;
             float height = pad + 34f + rowHeight * 4f + 50f + pad;
 
@@ -227,10 +240,7 @@ namespace PotatoPainter
             rect.anchoredPosition = new Vector2(12f, 0f);
             rect.sizeDelta = new Vector2(width, height);
 
-            // The build window's own background (its largest picture), or a plain dark one.
-            var source = window.GetComponentsInChildren<Image>(true)
-                .Where(image => image.sprite && !image.GetComponentInParent<Selectable>() && !image.transform.IsChildOf(rect))
-                .OrderByDescending(image => ((RectTransform)image.transform).rect.width * ((RectTransform)image.transform).rect.height).FirstOrDefault();
+            // The build window's own background, or a plain dark one.
             var background = panel.AddComponent<Image>();
             if (source) { background.sprite = source.sprite; background.type = source.type; background.color = source.color; background.material = source.material; background.pixelsPerUnitMultiplier = source.pixelsPerUnitMultiplier; }
             else background.color = new Color(0f, 0f, 0f, 0.75f);
@@ -279,6 +289,9 @@ namespace PotatoPainter
             Place((RectTransform)reset.transform, width - pad - 130f, y + 6f, 130f, 36f);
             reset.GetComponent<Button>().onClick.AddListener(Reset);
             panel.SetActive(false);
+            // Test data (0.2.1: panel not seen): where it was put. Taken out before release.
+            string Path(Transform t) { var parts = new List<string>(); for (; t; t = t.parent) parts.Insert(0, t.name); return string.Join("/", parts); }
+            Plugin.Log.LogInfo($"Panel built on {Path(window)} ({window.rect.width:0}x{window.rect.height:0}, active {window.gameObject.activeInHierarchy}); canvas {(canvas ? ((RectTransform)canvas.transform).rect.size.ToString() : "none")}; text from {Path(textSource.transform)}; background {(source ? source.sprite.name : "none")}");
         }
 
         // Colour sliders: the track and fill give way to a strip of the colours they reach; the handle stays.
