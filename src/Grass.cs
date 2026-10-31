@@ -64,7 +64,7 @@ namespace PotatoPainter
         private static void Reset(Area a)
         {
             if (!ClutterSystem.instance) return;   // leaving the world: nothing to remake
-            ClutterSystem.instance.ResetGrass(a.Center, a.Half + ResetReach);
+            var sw = Perf.Start(); ClutterSystem.instance.ResetGrass(a.Center, a.Half + ResetReach); Perf.Stop("grass reset", sw);
         }
 
         // Called by the game's clutter placement for every candidate root (patched in below).

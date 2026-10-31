@@ -79,8 +79,10 @@ namespace PotatoPainter
         internal static void Remove(Sheet s) { if (s != null) All.Remove(s); }
 
         // Every frame (Plugin.LateUpdate): visible ground sheets follow the camera's tessellation.
+        internal static long FrameVerts, FrameSheets;   // test-only (Perf): vertices and sheets refreshed this frame
         internal static void Update()
         {
+            FrameVerts = 0; FrameSheets = 0;
             for (int i = All.Count - 1; i >= 0; i--)
             {
                 var s = All[i];
@@ -144,6 +146,7 @@ namespace PotatoPainter
             }
             s.Mesh.vertices = s.Buf;
             s.Mesh.RecalculateBounds();
+            FrameVerts += s.Verts.Length; FrameSheets++;
         }
 
         // Hull shader, per corner: clamp(1 - (distance - 10) x 0.025, 0.01, 1).

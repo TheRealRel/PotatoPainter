@@ -163,7 +163,9 @@ namespace PotatoPainter
         private void Rebuild()
         {
             built?.Clear();
+            var sw = Perf.Start();
             built = Trace.Build(Frame, Size, Lift, Look.Material(Rune, Etched), Etched ? Look.HaloFor(Rune) : null, Col, Glow, false, (Etched ? "etch " : "paint ") + Rune.Art);
+            Perf.Stop("paint trace size " + Size.ToString("0.0"), sw, built.Sheets);
             nextCheck = Time.time + 2f + Random.value;
             Grass.Set(this, built.OnGround, Frame, Size);
         }
@@ -174,7 +176,8 @@ namespace PotatoPainter
             if (!HasData || Time.time < nextCheck) return;
             nextCheck = Time.time + 2f;
             // Rebuild when what lies under it changed: something loaded after it, or unloaded, or was replaced.
-            if (!Trace.HostIds(Frame.Center, Size).SetEquals(built.Hosts)) Rebuild();
+            var hc = Perf.Start(); bool changed = !Trace.HostIds(Frame.Center, Size).SetEquals(built.Hosts); Perf.Stop("host check", hc);
+            if (changed) Rebuild();
         }
 
         // The ghost: trace the paint where the crosshair points, at most ten times a second. The aim is the game's own
@@ -212,7 +215,9 @@ namespace PotatoPainter
             if (!aimValid) { Grass.Clear(this); ghostGrassAt = null; return; }
             if (ghostGrassAt.HasValue && Vector3.Distance(ghostGrassAt.Value, aim.Center) > 0.25f) { Grass.Clear(this); ghostGrassAt = null; }
             aimLayer = LayerAt(aim.Center, size, null);
+            var sw = Perf.Start();
             preview = Trace.Build(aim, size, 0.004f + 0.002f * aimLayer, Look.Material(Rune, Etched), Etched ? Look.HaloFor(Rune) : null, col, glow, true, "preview");
+            Perf.Stop("preview trace size " + size.ToString("0.0"), sw, preview.Sheets);
             if (!moved && !ghostGrassAt.HasValue && preview.OnGround) { Grass.Set(this, true, aim, size); ghostGrassAt = aim.Center; }
         }
 

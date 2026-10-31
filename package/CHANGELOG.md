@@ -1,3 +1,6 @@
+## 0.4.1 (test build, not released)
+- Test build: writes how long painting takes to the log every 5 seconds, to find the lag with large paints.
+
 ## 0.4.0 (test build, not released)
 - Symbols, painted and etched, under "Symbols: Painted" and "Symbols: Etched": a left and a right hand print from the start; Vegvísir, Huginn and Muninn, Sleipnir and Gungnir after Eikthyr; Yggdrasil, the Web of Wyrd, the troll cross and a knotwork Mjölnir after The Elder; the Valknut, Mjölnir, the triple horn and a bloody hand print after Bonemass.
 - A boss's symbols show up once the boss is down in the world, or once your character has defeated it.
