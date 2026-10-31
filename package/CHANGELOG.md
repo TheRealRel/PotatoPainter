@@ -1,3 +1,6 @@
+## 0.1.9 (test build, not released)
+- The preview does less work while you aim, and PotatoPainter no longer fills the game's log with test lines.
+
 ## 0.1.8 (test build, not released)
 - Runes on the ground follow the ground's bumps as the game draws them (with the Tessellation setting on, the ground has small hills its collision doesn't), so they no longer sink into it.
 - Aiming a rune at the ground no longer makes the grass around it flicker in and out.

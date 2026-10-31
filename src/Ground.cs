@@ -43,7 +43,6 @@ namespace PotatoPainter
 
         internal static readonly List<Sheet> All = new List<Sheet>();
         private static readonly Tess tess = new Tess();
-        private static bool loggedState;
 
         // Called by Trace.Build for a sheet traced on a heightmap: entries for its vertices on that ground.
         internal static Sheet Make(Heightmap hm, Mesh mesh, Renderer r, Transform space, float lift, List<(int vert, int i0, int i1, int i2, Vector3 bary, Vector3 baseInSpace, Vector3 normalInSpace)> on)
@@ -105,11 +104,6 @@ namespace PotatoPainter
             float tessAmount = mat && mat.HasProperty("_Tess") ? mat.GetFloat("_Tess") : 4f;
             float water = mat && mat.HasProperty("_WaterLevel") ? mat.GetFloat("_WaterLevel") : 30f;
             var mask = PaintMask(s.Hm);
-            if (!loggedState)
-            {
-                loggedState = true;
-                Plugin.Log.LogInfo($"Ground paint follows the drawn ground: tessellation {(tessOn ? "on" : "off")} (graphics setting), _Tess {tessAmount}, water level {water}, paint mask {(mask ? mask.width + "x" + mask.height + (mask.isReadable ? "" : " (not readable)") : "missing")}");
-            }
             var hmLocal = s.Hm.transform.worldToLocalMatrix;
             var toSpace = s.Space ? s.Space.worldToLocalMatrix : Matrix4x4.identity;
             var upInSpace = toSpace.MultiplyVector(Vector3.up);   // the shader adds its offset along the heightmap's local y
@@ -142,19 +136,14 @@ namespace PotatoPainter
                 perTri[t] = (u, v, dy, idx, tess.NumIndices);
             }
 
-            float lo = float.MaxValue, hi = float.MinValue; int drawnPoints = 0;
-            foreach (var d in perTri) drawnPoints += d.u.Length;
             for (int k = 0; k < s.Verts.Length; k++)
             {
                 var d = perTri[s.Tri[k]];
                 float off = Interpolate(d.u, d.v, d.dy, d.idx, d.nIdx, s.Domain[k]);
-                lo = Mathf.Min(lo, off); hi = Mathf.Max(hi, off);
                 s.Buf[s.Verts[k]] = s.Base[k] + upInSpace * off + s.Normal[k] * s.Lift;
             }
             s.Mesh.vertices = s.Buf;
             s.Mesh.RecalculateBounds();
-            if (force && s.Space)   // placed paint (not the preview), once when made: test data
-                Plugin.Log.LogInfo($"Ground sheet on {s.Hm.name}: {s.Verts.Length} points on {s.Tris.Count} ground triangles ({drawnPoints} drawn points with tessellation {(tessOn ? "on" : "off")}); the drawn ground lies {lo * 1000f:0} to {hi * 1000f:0} mm from its collider here");
         }
 
         // Hull shader, per corner: clamp(1 - (distance - 10) x 0.025, 0.01, 1).

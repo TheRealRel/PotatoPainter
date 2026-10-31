@@ -23,7 +23,7 @@ namespace PotatoPainter
     [NetworkCompatibility(CompatibilityLevel.EveryoneMustHaveMod, VersionStrictness.Minor)]
     public class Plugin : BaseUnityPlugin
     {
-        public const string Id = "potato.painter", Version = "0.1.8";
+        public const string Id = "potato.painter", Version = "0.1.9";
         // Saved in worlds and inventories: never rename.
         public const string ToolPrefab = "potato_runakefli";
         public const string TablePrefab = "_PotatoRunakefliPieceTable";
@@ -36,8 +36,6 @@ namespace PotatoPainter
         internal static PieceTable Table;
         internal static readonly HashSet<Paint> Doomed = new HashSet<Paint>();
         private static readonly AccessTools.FieldRef<Player, PieceTable> BuildPieces = AccessTools.FieldRefAccess<Player, PieceTable>("m_buildPieces");
-        private static readonly AccessTools.FieldRef<Player, GameObject> PlacementGhost = AccessTools.FieldRefAccess<Player, GameObject>("m_placementGhost");
-        private static readonly System.Reflection.FieldInfo PlacementStatus = AccessTools.Field(typeof(Player), "m_placementStatus");
         private static readonly Func<Player, bool> TakeInput = AccessTools.MethodDelegate<Func<Player, bool>>(AccessTools.Method(typeof(Player), "TakeInput"));
 
         private void Awake()
@@ -131,18 +129,12 @@ namespace PotatoPainter
         {
             if (Doomed.Count > 0)
             {
-                foreach (var p in Doomed.ToList()) if (p) { Log.LogInfo($"{p.Rune?.Name} at {p.Frame.Center:F2}: what it was painted on was destroyed, so it goes too"); p.Delete(); }
+                foreach (var p in Doomed.ToList()) if (p) p.Delete();
                 Doomed.Clear();
             }
             var player = Player.m_localPlayer;
             if (!player || !Table || !player.InPlaceMode() || BuildPieces(player) != Table || !TakeInput(player)) return;
             if (ZInput.GetButtonDown("Remove") || ZInput.GetButtonDown("JoyRemove")) RemoveAimed(player);
-            // Test data (0.1.2: "clicks did nothing"): what the game thought of the spot on each click with the Rúnakefli.
-            if (ZInput.GetButtonDown("Attack") || ZInput.GetButtonDown("JoyPlace"))
-            {
-                var ghost = PlacementGhost(player);
-                Log.LogInfo($"Click with the Rúnakefli: the game's placement is {PlacementStatus.GetValue(player)}, ghost {(ghost ? (ghost.activeSelf ? "shown" : "hidden") + " at " + ghost.transform.position.ToString("F2") : "none")}");
-            }
         }
 
         private void LateUpdate() { Bend.Update(); Ground.Update(); }
@@ -164,7 +156,6 @@ namespace PotatoPainter
             if (!PrivateArea.CheckAccess(at, 0f, true, false)) { player.Message(MessageHud.MessageType.Center, "$msg_privatezone"); return; }
             var piece = target.GetComponent<Piece>();
             if (piece && !piece.CanBeRemoved()) { player.Message(MessageHud.MessageType.Center, "$msg_cantremovenow"); return; }
-            Log.LogInfo($"{target.Rune?.Name} at {at:F2}: removed with the Rúnakefli");
             target.Delete();
             player.Message(MessageHud.MessageType.TopLeft, "$msg_potato_paint_removed");
         }

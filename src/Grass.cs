@@ -37,9 +37,6 @@ namespace PotatoPainter
         private static readonly Dictionary<object, Area> areas = new Dictionary<object, Area>();
         private static Area[] list = new Area[0];
         internal static bool Hooked;
-        // Test data (0.1.3: grass still under the runes): per clutter patch made, roots near a ground paint and left out.
-        private static int near, leftOut;
-        private static readonly Dictionary<string, int> leftOutBy = new Dictionary<string, int>();
 
         // Leaves clutter out under this paint (key: the paint or the ghost), or brings it back with on = false.
         internal static void Set(object key, bool on, Frame f, float size)
@@ -68,7 +65,6 @@ namespace PotatoPainter
         {
             if (!ClutterSystem.instance) return;   // leaving the world: nothing to remake
             ClutterSystem.instance.ResetGrass(a.Center, a.Half + ResetReach);
-            Plugin.Log.LogInfo($"Grass: asked the game to remake its clutter patches within {a.Half + ResetReach:0.0} m of {a.Center:F2} ({list.Length} ground paints known)");
         }
 
         // Called by the game's clutter placement for every candidate root (patched in below).
@@ -81,14 +77,8 @@ namespace PotatoPainter
             {
                 var d = p - l[i].Center; float h = l[i].Half + r;
                 if (d.sqrMagnitude > h * h * 2f + Depth * Depth) continue;
-                near++;
                 if (Mathf.Abs(Vector3.Dot(d, l[i].Side)) <= h && Mathf.Abs(Vector3.Dot(d, l[i].Up)) <= h && Mathf.Abs(Vector3.Dot(d, l[i].Normal)) <= Depth)
-                {
-                    leftOut++;
-                    var key = clutter != null ? clutter.m_name : "?";
-                    leftOutBy[key] = leftOutBy.TryGetValue(key, out var n) ? n + 1 : 1;
                     return true;
-                }
             }
             return false;
         }
@@ -99,7 +89,7 @@ namespace PotatoPainter
         {
             if (c == null) return 0f;
             if (reach.TryGetValue(c, out var r)) return r;
-            float side = 0f, height = 0f; string from = "nothing drawn";
+            float side = 0f, height = 0f;
             var prefab = c.m_prefab;
             var ir = prefab ? prefab.GetComponent<InstanceRenderer>() : null;
             if (c.m_instanced && ir && ir.m_mesh)
@@ -107,7 +97,6 @@ namespace PotatoPainter
                 var b = ir.m_mesh.bounds;
                 side = Mathf.Max((Mathf.Abs(b.center.x) + b.extents.x) * Mathf.Abs(ir.m_scale.x), (Mathf.Abs(b.center.z) + b.extents.z) * Mathf.Abs(ir.m_scale.z));
                 height = (b.center.y + b.extents.y) * Mathf.Abs(ir.m_scale.y);
-                from = $"mesh {ir.m_mesh.name} at scale {ir.m_scale}";
             }
             else if (prefab)
             {
@@ -117,28 +106,17 @@ namespace PotatoPainter
                     side = Mathf.Max(side, Mathf.Abs(b.min.x - o.x), Mathf.Abs(b.max.x - o.x), Mathf.Abs(b.min.z - o.z), Mathf.Abs(b.max.z - o.z));
                     height = Mathf.Max(height, b.max.y - o.y);
                 }
-                from = "its renderers";
             }
             float scale = Mathf.Max(c.m_scaleMin, c.m_scaleMax, 0f);
             float tilt = Mathf.Clamp(Mathf.Max(Mathf.Abs(c.m_maxTilt), Mathf.Abs(c.m_minTilt)), 0f, 90f) * Mathf.Deg2Rad;
-            float full = (side + height * Mathf.Sin(tilt)) * scale + Margin;
-            r = Mathf.Min(full, ReachCap);
+            r = Mathf.Min((side + height * Mathf.Sin(tilt)) * scale + Margin, ReachCap);
             reach[c] = r;
-            Plugin.Log.LogInfo($"Clutter {c.m_name} ({(prefab ? prefab.name : "no prefab")}): left out within {r:0.00} m of a ground rune; reaches {full:0.00} m from its root ({from}, {side:0.00} m across half, {height:0.00} m tall, random scale {c.m_scaleMin:0.##} to {c.m_scaleMax:0.##}, tilt up to {tilt * Mathf.Rad2Deg:0} degrees)");
             return r;
         }
 
         [HarmonyPatch(typeof(ClutterSystem), "GenerateVegPatch")]
         private static class Patch
         {
-            private static void Prefix() { near = 0; leftOut = 0; leftOutBy.Clear(); }
-
-            private static void Postfix(object[] __args)
-            {
-                if (near == 0) return;
-                Plugin.Log.LogInfo($"Grass: clutter patch ({string.Join(", ", __args.Select(a => a?.ToString() ?? "null"))}) made: {near} roots near a ground paint, {leftOut} left out ({string.Join(", ", leftOutBy.Select(kv => kv.Key + " " + kv.Value))})");
-            }
-
             private static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions)
             {
                 var code = instructions.ToList();
@@ -163,7 +141,6 @@ namespace PotatoPainter
                 first.labels.AddRange(code[at + 2].labels); code[at + 2].labels.Clear();
                 code.InsertRange(at + 2, new[] { first, new CodeInstruction(OpCodes.Ldloc, code[at + 2].operand), new CodeInstruction(OpCodes.Call, hidden), new CodeInstruction(OpCodes.Brtrue, skip) });
                 Hooked = true;
-                Plugin.Log.LogInfo("Grass is left out under ground paint (ClutterSystem.GenerateVegPatch patched).");
                 return code;
             }
         }

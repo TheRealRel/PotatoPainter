@@ -74,8 +74,7 @@ namespace PotatoPainter
                 var found = Resources.FindObjectsOfTypeAll<Material>().Where(Additive).ToList();
                 halo = found.FirstOrDefault(x => x.name == "embers")
                     ?? found.FirstOrDefault(x => x.shaderKeywords.Length == 1 && x.shaderKeywords[0] == "_ALPHABLEND_ON" && x.GetFloat("_SoftParticlesEnabled") == 0f);
-                if (halo) Plugin.Log.LogInfo($"Glow halo: a copy of the game's \"{halo.name}\" material ({found.Count} additive {shader} materials loaded).");
-                else Plugin.Log.LogWarning($"Glow halo off this session: none of the game's additive {shader} materials is loaded ({found.Count} found).");
+                if (!halo) Plugin.Log.LogWarning($"Glow halo off this session: none of the game's additive {shader} materials is loaded ({found.Count} found).");
             }
             if (!halo || !tex) return null;
             var m = new Material(halo) { name = "PotatoPainter halo " + name, mainTexture = tex };

@@ -29,8 +29,6 @@ namespace PotatoPainter
         internal readonly HashSet<int> Hosts = new HashSet<int>();
         internal int Sheets;
         internal bool OnGround;                                   // some of it lies on the ground (Grass.cs)
-        internal int Points, Missed;                              // grid points, and those that found nothing under them
-        internal readonly List<string> Report = new List<string>();   // per host: points landed and squares kept (close up)
 
         internal void Clear()
         {
@@ -46,7 +44,7 @@ namespace PotatoPainter
             foreach (var b in Benders) Bend.All.Remove(b);
             foreach (var g in GroundSheets) Ground.Remove(g);
             GroundSheets.Clear();
-            Objects.Clear(); Registered.Clear(); Benders.Clear(); Hosts.Clear(); Sheets = 0; CenterHost = null; OnGround = false; Points = Missed = 0; Report.Clear();
+            Objects.Clear(); Registered.Clear(); Benders.Clear(); Hosts.Clear(); Sheets = 0; CenterHost = null; OnGround = false;
         }
     }
 
@@ -67,7 +65,6 @@ namespace PotatoPainter
         private sealed class Host
         {
             internal Transform Root;
-            internal string FromColliders;   // set when its drawn models can't be read and its colliders were traced instead
             internal readonly List<Level> Levels = new List<Level>();
             internal readonly List<Surface> Reference = new List<Surface>();   // what is drawn up close right now
         }
@@ -77,14 +74,14 @@ namespace PotatoPainter
 
         // ------------------------------------------------------------------ aiming
         // Where a paint of this size would go along the ray, as the game draws the surfaces there.
-        internal static bool Aim(Vector3 eye, Vector3 dir, float max, float size, Vector3 cameraRight, float turn, out Frame frame, out string why)
+        internal static bool Aim(Vector3 eye, Vector3 dir, float max, float size, Vector3 cameraRight, float turn, out Frame frame)
         {
-            frame = default; why = null;
-            if (!Physics.Raycast(eye, dir, out var hit, max, Mask, QueryTriggerInteraction.Ignore)) { why = $"the aim ray hit nothing within {max:0.0} m"; return false; }
+            frame = default;
+            if (!Physics.Raycast(eye, dir, out var hit, max, Mask, QueryTriggerInteraction.Ignore)) return false;
             var hosts = Hosts(hit.point, size, hit.collider);
-            if (hosts.Count == 0) { why = $"the aim ray hit {hit.collider.name} (layer {LayerMask.LayerToName(hit.collider.gameObject.layer)}, a {hit.collider.GetType().Name} on {RootOf(hit.collider).name}), which has no surface or collider that can be read"; return false; }
+            if (hosts.Count == 0) return false;
             var reference = hosts.SelectMany(h => h.Reference).ToList();
-            if (!Cast(reference, eye, dir, hit.distance + 1.5f, default, out var center, out var n, out var aimed, out var aimedTri, out _)) { why = $"the aim ray hit {hit.collider.name}, but none of the drawn surfaces of {string.Join(", ", hosts.Select(h => h.Root.name))} lies on it"; return false; }
+            if (!Cast(reference, eye, dir, hit.distance + 1.5f, default, out var center, out var n, out var aimed, out var aimedTri, out _)) return false;
             var mat = aimed.TriMat != null ? aimed.TriMat[aimedTri] : null;
             frame.Center = center; frame.Normal = n;
             frame.Tree = mat && mat.shader && mat.shader.name == "Custom/Vegetation";
@@ -140,7 +137,6 @@ namespace PotatoPainter
                         if (d < best) { best = d; owner[i] = k; }
                     }
             }
-            built.Points = count; built.Missed = owner.Count(o => o < 0);
             // The host the centre is painted on: the paint goes when it's destroyed.
             {
                 float best = float.MaxValue;
@@ -198,30 +194,6 @@ namespace PotatoPainter
                             if ((verts[a] - verts[b]).magnitude > cell || (verts[a] - verts[c]).magnitude > cell || (verts[d] - verts[b]).magnitude > cell || (verts[d] - verts[c]).magnitude > cell) continue;
                             tri.AddRange(new[] { a, c, b, b, c, d, a, b, c, b, d, c });   // both faces
                         }
-                    // Test data (0.1.6: runes on bumpy ground partly missing): how far below the drawn surface the sheet's
-                    // straight edges between its points dip, where they cross a fold of the surface.
-                    string sag = "";
-                    if (lv.Active && lv.Index == 0 && tri.Count > 0)
-                    {
-                        float worst = float.MaxValue; int under = 0, tested = 0;
-                        for (int y = 0; y < grid; y++)
-                            for (int x = 0; x < grid; x++)
-                            {
-                                int a = y * (grid + 1) + x;
-                                if (owner[a] != k || !ok[a] || !ok[a + 1] || !ok[a + grid + 1] || !ok[a + grid + 2]) continue;
-                                foreach (var (i0, i1) in new[] { (a, a + 1), (a, a + grid + 1), (a + 1, a + grid + 2), (a + 1, a + grid + 1) })
-                                {
-                                    var mid = (verts[i0] + verts[i1]) * 0.5f;
-                                    if (!Cast(surfaces, mid + n * reach, -n, reach * 2f, plane, out var at2, out _, out _, out _, out _)) continue;
-                                    float clear = Vector3.Dot(mid - at2, n); tested++;
-                                    if (clear < worst) worst = clear;
-                                    if (clear < 0.001f) under++;
-                                }
-                            }
-                        if (tested > 0) sag = $", lowest edge {worst * 1000f:0.0} mm above the surface, {under} of {tested} edges under 1 mm";
-                    }
-                    if (lv.Active && lv.Index == 0)
-                        built.Report.Add($"{hosts[k].Root.name}{(hosts[k].FromColliders != null ? " (its models can't be read; traced on its colliders: " + hosts[k].FromColliders + ")" : "")}: {Enumerable.Range(0, count).Count(i => owner[i] == k && ok[i])} of {owner.Count(o => o == k)} points landed, {tri.Count / 12} of {grid * grid} squares{sag}");
                     if (tri.Count == 0) continue;
 
                     // Trees: bent on the CPU exactly like the bark's triangles, when the bark has no flutter or push and every
@@ -261,7 +233,6 @@ namespace PotatoPainter
                         mesh.MarkDynamic();
                         var gs = Ground.Make(groundHm, mesh, r, parent, lift, on);
                         if (gs != null) built.GroundSheets.Add(gs);
-                        else if (!preview) built.Report.Add("ground sheet left as traced (the drawn ground couldn't be read)");
                     }
                     if (cpu)
                     {
@@ -461,18 +432,13 @@ namespace PotatoPainter
             if (h.Reference.Count == 0)
             {
                 var lv = new Level { Index = 0, Parent = root, Active = true };
-                var kinds = new List<string>();
                 foreach (var col in root.GetComponentsInChildren<Collider>(false))
                 {
                     if (col.isTrigger || ((1 << col.gameObject.layer) & Mask) == 0 || RootOf(col) != root) continue;
                     var s = FromCollider(col);
-                    if (s != null) { lv.Surfaces.Add(s); kinds.Add(col.GetType().Name); }
+                    if (s != null) lv.Surfaces.Add(s);
                 }
-                if (lv.Surfaces.Count > 0)
-                {
-                    h.Levels.Add(lv); h.Reference.AddRange(lv.Surfaces);
-                    h.FromColliders = string.Join(", ", kinds.GroupBy(k => k).Select(g => $"{g.Count()} {g.Key}"));
-                }
+                if (lv.Surfaces.Count > 0) { h.Levels.Add(lv); h.Reference.AddRange(lv.Surfaces); }
             }
             return h;
         }

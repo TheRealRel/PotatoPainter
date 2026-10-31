@@ -2,7 +2,6 @@
 // dedicated server) traces it onto the pieces, trees, rocks or ground under it when it loads, and again whenever what lies
 // under it changes (a wall that loads after it, a tree that grows back). As the placement ghost it shows a preview.
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.Linq;
 using Jotunn.Managers;
 using UnityEngine;
@@ -24,7 +23,6 @@ namespace PotatoPainter
 
         // The placement ghost's latest aim, read by OnPlaced on the same client right after the game places the piece.
         private static Frame aim; private static bool aimValid; private static float aimTime; private static int aimLayer;
-        private static string aimWhy = "";
 
         // Same rune on the same spot (centres closer than this share of its size, facing the same way): a repeat. Repeats
         // are left out when painting, and piles of them already in the world (test 0.1.2: 5 to 30 per spot, painted while
@@ -43,7 +41,6 @@ namespace PotatoPainter
         private Vector3 lastEye = Vector3.positiveInfinity, lastDir; private float lastTurn;
         private static readonly HarmonyLib.AccessTools.FieldRef<Player, int> PlaceRotation = HarmonyLib.AccessTools.FieldRefAccess<Player, int>("m_placeRotation");
         private static readonly HarmonyLib.AccessTools.FieldRef<Player, float> PlaceRotationDegrees = HarmonyLib.AccessTools.FieldRefAccess<Player, float>("m_placeRotationDegrees");
-        private float visibleCheck = -1f;
         private Vector3? ghostGrassAt;
 
         private float Lift => 0.004f + 0.002f * Layer;   // layers 2 mm apart, the newest on top (probe test 11)
@@ -70,14 +67,11 @@ namespace PotatoPainter
             if (!aimValid || Time.time - aimTime > 1f)
             {
                 placedWithoutAim = true;
-                Plugin.Log.LogInfo($"Placed {Rune?.Name} without a usable preview ({(aimValid ? $"preview {Time.time - aimTime:0.0} s old" : "no preview: " + aimWhy)}): taken away again");
                 return;
             }
-            var same = Loaded.FirstOrDefault(p => p && p.HasData && Repeats(p, Rune, aim, DefaultSize));
-            if (same)
+            if (Loaded.Any(p => p && p.HasData && Repeats(p, Rune, aim, DefaultSize)))
             {
                 repeat = true;
-                Plugin.Log.LogInfo($"{Rune?.Name} at {aim.Center:F2}: already painted there (layer {same.Layer}), so this one is left out");
                 return;
             }
             // The layer as it is now: the preview's can be stale when the aim hasn't moved since the last paint here
@@ -89,7 +83,6 @@ namespace PotatoPainter
             zdo.Set(KVersion, 1);
             zdo.SetPosition(aim.Center);
             transform.position = aim.Center;
-            Plugin.Log.LogInfo($"Painted {Rune?.Name} at {aim.Center:F2} (layer {aimLayer}{(aim.Tree ? ", on a tree" : "")})");
         }
 
         private void Load()
@@ -113,7 +106,7 @@ namespace PotatoPainter
             Layer = zdo.GetInt(KLayer);
             HasData = true;
             if (ClearPile()) return;
-            Rebuild("loaded");
+            Rebuild();
         }
 
         private static bool Repeats(Paint p, Rune rune, Frame f, float size) =>
@@ -131,61 +124,35 @@ namespace PotatoPainter
             int layer = 0;
             foreach (var p in Loaded)
                 if (p && p.HasData && !pile.Contains(p) && p.Layer < keep.Layer && Vector3.Distance(p.Frame.Center, keep.Frame.Center) < (p.Size + keep.Size) * 0.5f * 0.9f) layer = Mathf.Max(layer, p.Layer + 1);
-            Plugin.Log.LogInfo($"{Rune.Name} at {Frame.Center:F2}: {pile.Count} of the same rune on this spot; kept the top one (layer {keep.Layer}, now {layer}), took away {gone.Count}");
             foreach (var p in gone) { p.HasData = false; p.Delete(); }
-            if (keep.Layer != layer) keep.SetLayer(layer, "a pile on its spot was cleared");
+            if (keep.Layer != layer) keep.SetLayer(layer);
             return gone.Contains(this);
         }
 
-        private void SetLayer(int layer, string why)
+        private void SetLayer(int layer)
         {
             if (!nview || !nview.IsValid()) return;
             nview.ClaimOwnership();
             nview.GetZDO().Set(KLayer, layer);
             Layer = layer;
-            if (built != null) Rebuild(why);
+            if (built != null) Rebuild();
         }
 
-        private void Rebuild(string why)
+        private void Rebuild()
         {
             built?.Clear();
-            var sw = Stopwatch.StartNew();
             built = Trace.Build(Frame, Size, Lift, Look.Material(Rune), Col, false, "paint " + Rune.Art);
             nextCheck = Time.time + 2f + Random.value;
-            visibleCheck = Time.time + 1.5f;
-            Plugin.Log.LogInfo($"{Rune.Name} at {Frame.Center:F2}: {built.Sheets} sheets, {built.Hosts.Count} things under it, centre on {(built.CenterHost ? built.CenterHost.name : "nothing")} ({why}, {sw.ElapsedMilliseconds} ms); "
-                + $"{built.Points - built.Missed} of {built.Points} points found a surface; close up: {(built.Report.Count > 0 ? string.Join("; ", built.Report) : "nothing")}{(built.OnGround ? "; grass left out under it" : "")}");
             Grass.Set(this, built.OnGround, Frame, Size);
         }
 
         private void Update()
         {
             if (ghost) { Preview(); return; }
-            if (visibleCheck > 0f && Time.time >= visibleCheck && built != null)
-            {
-                // Test data (0.1.3: ground runes not seen): is each sheet drawn, and what is between the camera and it.
-                visibleCheck = -1f;
-                var cam = Utils.GetMainCamera();
-                if (built.OnGround && Physics.Raycast(Frame.Center + Frame.Normal, -Frame.Normal, out var g, 2f, LayerMask.GetMask("terrain"), QueryTriggerInteraction.Ignore))
-                    Plugin.Log.LogInfo($"{Rune.Name} at {Frame.Center:F2}: the ground under its centre is now {Vector3.Dot(g.point - Frame.Center, Frame.Normal) * 1000f:0.0} mm from where it was painted");
-                foreach (var o in built.Objects)
-                {
-                    var r = o ? o.GetComponent<Renderer>() : null;
-                    if (!r) continue;
-                    string between = "";
-                    if (cam)
-                    {
-                        var c = r.bounds.center; var from = cam.transform.position; var d = c - from;
-                        between = Physics.Raycast(from, d.normalized, out var hit, d.magnitude - 0.02f, Trace.Mask, QueryTriggerInteraction.Ignore)
-                            ? $"; {hit.collider.name} is in front of it, {d.magnitude - hit.distance:0.00} m before it" : "; nothing solid in front of it";
-                    }
-                    Plugin.Log.LogInfo($"{Rune.Name} at {Frame.Center:F2}: sheet {o.name} on layer {LayerMask.LayerToName(o.layer)} under {(o.transform.parent ? o.transform.parent.name : "nothing")}, drawn {(r.isVisible ? "on screen" : "nowhere on screen")}, enabled {r.enabled}, active {o.activeInHierarchy}, bounds centre {r.bounds.center:F2} size {r.bounds.size:F2}, {(cam ? Vector3.Distance(cam.transform.position, r.bounds.center).ToString("0.0") + " m from the camera" : "no camera")}{between}");
-                }
-            }
             if (!HasData || Time.time < nextCheck) return;
             nextCheck = Time.time + 2f;
             // Rebuild when what lies under it changed: something loaded after it, or unloaded, or was replaced.
-            if (!Trace.HostIds(Frame.Center, Size).SetEquals(built.Hosts)) Rebuild("what lies under it changed");
+            if (!Trace.HostIds(Frame.Center, Size).SetEquals(built.Hosts)) Rebuild();
         }
 
         // The ghost: trace the paint where the crosshair points, at most ten times a second. The aim is the game's own
@@ -204,21 +171,14 @@ namespace PotatoPainter
             // nearby (layers) and pieces that load show up in the preview too.
             bool moved = (eye - lastEye).sqrMagnitude >= 1e-4f || Vector3.Angle(dir, lastDir) > 0.05f || turn != lastTurn;
             if (Time.time - previewTime < (moved ? 0.1f : 0.5f)) return;
-            if (turn != lastTurn) Plugin.Log.LogInfo($"Preview of {Rune?.Name}: turned to {turn:0.#} degrees");
             lastEye = eye; lastDir = dir; lastTurn = turn; previewTime = Time.time;
             preview?.Clear();
             // Grass is left out under the preview once the aim rests, and given back only when the aim leaves that spot
             // (test 0.1.7: the camera's own small movements gave it back and took it again twice a second, remaking four
             // grass patches each time).
-            bool was = aimValid;
-            aimValid = Trace.Aim(eye, dir, 50f, DefaultSize, cam.transform.right, turn, out aim, out var why);
-            if (aimValid && player && Vector3.Distance(player.GetEyePoint(), aim.Center) > player.m_maxPlaceDistance)
-            { aimValid = false; why = $"{Vector3.Distance(player.GetEyePoint(), aim.Center):0.0} m away, farther than you can build ({player.m_maxPlaceDistance:0.0} m)"; }
+            aimValid = Trace.Aim(eye, dir, 50f, DefaultSize, cam.transform.right, turn, out aim)
+                && (!player || Vector3.Distance(player.GetEyePoint(), aim.Center) <= player.m_maxPlaceDistance);
             aimTime = Time.time;
-            // Logged when it changes only (test data: "no preview where I aimed", 0.1.2).
-            if (!aimValid && (was || why != aimWhy)) Plugin.Log.LogInfo($"Preview of {Rune?.Name}: nothing to paint where you aim ({why})");
-            else if (aimValid && !was) Plugin.Log.LogInfo($"Preview of {Rune?.Name}: on {aim.Center:F2}");
-            aimWhy = why ?? "";
             if (!aimValid) { Grass.Clear(this); ghostGrassAt = null; return; }
             if (ghostGrassAt.HasValue && Vector3.Distance(ghostGrassAt.Value, aim.Center) > 0.25f) { Grass.Clear(this); ghostGrassAt = null; }
             aimLayer = LayerAt(aim.Center, DefaultSize, null);
