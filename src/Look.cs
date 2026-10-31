@@ -135,11 +135,21 @@ namespace PotatoPainter
             return leaf;
         }
 
-        // One paint's colour, per renderer, so each paint keeps its own.
-        internal static void Colour(Renderer r, Color col)
+        // One paint's colour (and an etched one's glow), per renderer, so each paint keeps its own.
+        internal static void Colour(Renderer r, Color col, Color glow)
         {
             var block = new MaterialPropertyBlock();
             block.SetColor("_Color", new Color(col.r, col.g, col.b, 1f));
+            if (glow.maxColorComponent > 0f) block.SetColor("_EmissionColor", new Color(glow.r, glow.g, glow.b, 1f));
+            r.SetPropertyBlock(block);
+        }
+
+        // An etched rune's halo: its glow at the faint halo level.
+        internal static void HaloColour(Renderer r, Color glow)
+        {
+            var block = new MaterialPropertyBlock();
+            var c = glow * HaloFaint; c.a = 1f;
+            block.SetColor("_Color", c);
             r.SetPropertyBlock(block);
         }
 

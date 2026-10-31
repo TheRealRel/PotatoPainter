@@ -23,7 +23,7 @@ namespace PotatoPainter
     [NetworkCompatibility(CompatibilityLevel.EveryoneMustHaveMod, VersionStrictness.Minor)]
     public class Plugin : BaseUnityPlugin
     {
-        public const string Id = "potato.painter", Version = "0.2.0";
+        public const string Id = "potato.painter", Version = "0.2.1";
         // Saved in worlds and inventories: never rename.
         public const string ToolPrefab = "potato_runakefli";
         public const string TablePrefab = "_PotatoRunakefliPieceTable";
@@ -41,7 +41,7 @@ namespace PotatoPainter
         internal static ManualLogSource Log;
         internal static PieceTable Table;
         internal static readonly HashSet<Paint> Doomed = new HashSet<Paint>();
-        private static readonly AccessTools.FieldRef<Player, PieceTable> BuildPieces = AccessTools.FieldRefAccess<Player, PieceTable>("m_buildPieces");
+        internal static readonly AccessTools.FieldRef<Player, PieceTable> BuildPieces = AccessTools.FieldRefAccess<Player, PieceTable>("m_buildPieces");
         private static readonly Func<Player, bool> TakeInput = AccessTools.MethodDelegate<Func<Player, bool>>(AccessTools.Method(typeof(Player), "TakeInput"));
 
         private void Awake()
@@ -153,7 +153,7 @@ namespace PotatoPainter
             if (ZInput.GetButtonDown("Remove") || ZInput.GetButtonDown("JoyRemove")) RemoveAimed(player);
         }
 
-        private void LateUpdate() { Bend.Update(); Ground.Update(); }
+        private void LateUpdate() { Bend.Update(); Ground.Update(); Panel.Update(); }
 
         // The Rúnakefli's remove: the topmost paint where you aim, with the game's own no-build and ward checks.
         private static void RemoveAimed(Player player)

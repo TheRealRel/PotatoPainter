@@ -102,7 +102,7 @@ namespace PotatoPainter
         // Traces the paint on everything under it. preview: only what is drawn up close right now, in world space, not
         // added to the game's model switching (the placement ghost). halo: drawn again on the same sheet with it (etched
         // runes, the way probe test 22 drew it), or null.
-        internal static Built Build(Frame f, float size, float lift, Material material, Material halo, Color col, bool preview, string name)
+        internal static Built Build(Frame f, float size, float lift, Material material, Material halo, Color col, Color glow, bool preview, string name)
         {
             var built = new Built();
             var hosts = Hosts(f.Center, size, null);
@@ -220,7 +220,7 @@ namespace PotatoPainter
                     r.sharedMaterial = material;
                     r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
                     r.receiveShadows = true;
-                    Look.Colour(r, col);
+                    Look.Colour(r, col, glow);
                     built.Objects.Add(go); built.Sheets++;
                     MeshRenderer hr = null;
                     if (halo)
@@ -233,6 +233,7 @@ namespace PotatoPainter
                         hr.sharedMaterial = halo;
                         hr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
                         hr.receiveShadows = false;
+                        Look.HaloColour(hr, glow);
                         built.Objects.Add(hg);
                     }
                     var groundHm = hosts[k].Root.GetComponent<Heightmap>();

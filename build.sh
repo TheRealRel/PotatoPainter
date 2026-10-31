@@ -15,4 +15,5 @@ $CSC -nologo -nostdlib -noconfig -target:library -optimize+ -deterministic -lang
   -r:"$M/mscorlib.dll" -r:"$M/netstandard.dll" -r:"$M/System.dll" -r:"$M/System.Core.dll" \
   -r:"$M/assembly_valheim.dll" -r:"$M/assembly_utils.dll" -r:"$M/assembly_guiutils.dll" \
   -r:"$M/UnityEngine.dll" -r:"$M/UnityEngine.CoreModule.dll" -r:"$M/UnityEngine.PhysicsModule.dll" -r:"$M/UnityEngine.ImageConversionModule.dll" -r:"$M/UnityEngine.AssetBundleModule.dll" \
+  -r:"$M/UnityEngine.UI.dll" -r:"$M/UnityEngine.UIModule.dll" -r:"$M/Unity.TextMeshPro.dll" -r:"$M/UnityEngine.TextRenderingModule.dll" \
   -r:"$B/core/BepInEx.dll" -r:"$B/core/0Harmony.dll" -r:"$J" src/*.cs

@@ -1,3 +1,8 @@
+## 0.2.1 (test build, not released)
+- A panel beside the Rúnakefli's build menu sets the next rune's colour (hue, saturation, brightness) and size (0.25 to 2 m); for etched runes, the glow's colour and strength. It follows the open tab, and your settings stay with your character until you change them. Default puts them back.
+- The preview shows the rune in the colour, size and glow it will have.
+- A different colour or size of the same rune can go over an old one.
+
 ## 0.2.0 (test build, not released)
 - Every rune comes two ways, each in its own tab of the Rúnakefli's menu: Elder Futhark: Painted, and Elder Futhark: Etched, which glows ember with a faint halo.
 - A painted rune costs 1 Coal; an etched one 1 Coal and 1 Resin. Taking a rune away with the Rúnakefli gives them back.

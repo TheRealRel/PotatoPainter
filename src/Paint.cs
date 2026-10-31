@@ -20,11 +20,12 @@ namespace PotatoPainter
         // Saved in worlds: never rename.
         private static readonly int KVersion = "PotatoPainter.Version".GetStableHashCode(), KCenter = "PotatoPainter.Center".GetStableHashCode(),
             KNormal = "PotatoPainter.Normal".GetStableHashCode(), KUp = "PotatoPainter.Up".GetStableHashCode(), KTree = "PotatoPainter.Tree".GetStableHashCode(),
-            KSize = "PotatoPainter.Size".GetStableHashCode(), KColor = "PotatoPainter.Color".GetStableHashCode(), KLayer = "PotatoPainter.Layer".GetStableHashCode();
+            KSize = "PotatoPainter.Size".GetStableHashCode(), KColor = "PotatoPainter.Color".GetStableHashCode(), KLayer = "PotatoPainter.Layer".GetStableHashCode(),
+            KGlow = "PotatoPainter.Glow".GetStableHashCode();
 
         // The placement ghost's latest aim, read by OnPlaced on the same client right after the game places the piece.
         private static Frame aim; private static bool aimValid; private static float aimTime; private static int aimLayer;
-        private static Rune aimRune; private static bool aimEtched;
+        private static Rune aimRune; private static bool aimEtched; private static float aimSize = DefaultSize; private static Color aimCol, aimGlow;
 
         // Same rune on the same spot (centres closer than this share of its size, facing the same way): a repeat. Repeats
         // are left out when painting, and piles of them already in the world (test 0.1.2: 5 to 30 per spot, painted while
@@ -32,7 +33,7 @@ namespace PotatoPainter
         private const float RepeatShare = 0.15f;
 
         internal Rune Rune;
-        internal Frame Frame; internal float Size; internal Color Col; internal int Layer;
+        internal Frame Frame; internal float Size; internal Color Col, Glow; internal int Layer;
         internal bool HasData;
         internal Transform CenterHost => built?.CenterHost;
 
@@ -40,7 +41,7 @@ namespace PotatoPainter
         private bool ghost, listed, placedWithoutAim, repeat;
         private Built built, preview;
         private float nextCheck, previewTime;
-        private Vector3 lastEye = Vector3.positiveInfinity, lastDir; private float lastTurn;
+        private Vector3 lastEye = Vector3.positiveInfinity, lastDir; private float lastTurn; private int lastSettings = -1;
         private static readonly HarmonyLib.AccessTools.FieldRef<Player, int> PlaceRotation = HarmonyLib.AccessTools.FieldRefAccess<Player, int>("m_placeRotation");
         private static readonly HarmonyLib.AccessTools.FieldRef<Player, float> PlaceRotationDegrees = HarmonyLib.AccessTools.FieldRefAccess<Player, float>("m_placeRotationDegrees");
         private Vector3? ghostGrassAt;
@@ -71,17 +72,18 @@ namespace PotatoPainter
                 placedWithoutAim = true;
                 return;
             }
-            if (Loaded.Any(p => p && p.HasData && Repeats(p, Rune, Etched, aim, DefaultSize)))
+            if (Loaded.Any(p => p && p.HasData && Repeats(p, Rune, Etched, aim, aimSize, aimCol, aimGlow)))
             {
                 repeat = true;
                 return;
             }
             // The layer as it is now: the preview's can be stale when the aim hasn't moved since the last paint here
             // (two paints on one spot both landed on layer 0 in the first test).
-            aimLayer = LayerAt(aim.Center, DefaultSize, null);
+            aimLayer = LayerAt(aim.Center, aimSize, null);
             var zdo = nview.GetZDO();
             zdo.Set(KCenter, aim.Center); zdo.Set(KNormal, aim.Normal); zdo.Set(KUp, aim.Up); zdo.Set(KTree, aim.Tree ? 1 : 0);
-            zdo.Set(KSize, DefaultSize); zdo.Set(KColor, new Vector3(Look.RedOchre.r, Look.RedOchre.g, Look.RedOchre.b)); zdo.Set(KLayer, aimLayer);
+            zdo.Set(KSize, aimSize); zdo.Set(KColor, new Vector3(aimCol.r, aimCol.g, aimCol.b)); zdo.Set(KLayer, aimLayer);
+            if (Etched) zdo.Set(KGlow, new Vector3(aimGlow.r, aimGlow.g, aimGlow.b));
             zdo.Set(KVersion, 1);
             zdo.SetPosition(aim.Center);
             transform.position = aim.Center;
@@ -105,6 +107,9 @@ namespace PotatoPainter
             Size = zdo.GetFloat(KSize, DefaultSize);
             var c = zdo.GetVec3(KColor, new Vector3(Look.RedOchre.r, Look.RedOchre.g, Look.RedOchre.b));
             Col = new Color(c.x, c.y, c.z, 1f);
+            // Etched runes from before the panel (0.2.0) glow ember at strength 1.
+            var g = Etched ? zdo.GetVec3(KGlow, new Vector3(Look.Ember.r, Look.Ember.g, Look.Ember.b)) : Vector3.zero;
+            Glow = new Color(g.x, g.y, g.z, 1f);
             Layer = zdo.GetInt(KLayer);
             HasData = true;
             if (ClearPile()) return;
@@ -116,18 +121,23 @@ namespace PotatoPainter
         internal static string Refusal()
         {
             if (!aimValid || Time.time - aimTime > 1f) return aimEtched ? "$msg_potato_etch_nosurface" : "$msg_potato_paint_nosurface";
-            if (aimRune != null && Loaded.Any(p => p && p.HasData && Repeats(p, aimRune, aimEtched, aim, DefaultSize))) return aimEtched ? "$msg_potato_etch_repeat" : "$msg_potato_paint_repeat";
+            if (aimRune != null && Loaded.Any(p => p && p.HasData && Repeats(p, aimRune, aimEtched, aim, aimSize, aimCol, aimGlow))) return aimEtched ? "$msg_potato_etch_repeat" : "$msg_potato_paint_repeat";
             return null;
         }
 
-        private static bool Repeats(Paint p, Rune rune, bool etched, Frame f, float size) =>
-            p.Rune == rune && p.Etched == etched && Vector3.Distance(p.Frame.Center, f.Center) < Mathf.Min(p.Size, size) * RepeatShare && Vector3.Dot(p.Frame.Normal, f.Normal) > 0.9f;
+        // The same rune of the same kind, colour, glow and size on the same spot. A new colour or size over an old one is
+        // allowed: it goes on top.
+        private static bool Repeats(Paint p, Rune rune, bool etched, Frame f, float size, Color col, Color glow) =>
+            p.Rune == rune && p.Etched == etched && Mathf.Abs(p.Size - size) < 0.01f && Near(p.Col, col) && Near(p.Glow, glow)
+            && Vector3.Distance(p.Frame.Center, f.Center) < Mathf.Min(p.Size, size) * RepeatShare && Vector3.Dot(p.Frame.Normal, f.Normal) > 0.9f;
+
+        private static bool Near(Color a, Color b) => Mathf.Abs(a.r - b.r) < 0.01f && Mathf.Abs(a.g - b.g) < 0.01f && Mathf.Abs(a.b - b.b) < 0.01f;
 
         // A pile of the same rune on one spot: the top one stays, the rest are taken away for everyone, and the one kept is
         // lowered to just above whatever else lies under it. True when this paint was taken away.
         private bool ClearPile()
         {
-            var pile = Loaded.Where(p => p && p.HasData && Repeats(p, Rune, Etched, Frame, Size)).ToList();
+            var pile = Loaded.Where(p => p && p.HasData && Repeats(p, Rune, Etched, Frame, Size, Col, Glow)).ToList();
             if (pile.Count < 2) return false;
             var keep = pile.OrderByDescending(p => p.Layer).First();
             var gone = new HashSet<Paint>(pile.Where(p => p != keep));
@@ -152,7 +162,7 @@ namespace PotatoPainter
         private void Rebuild()
         {
             built?.Clear();
-            built = Trace.Build(Frame, Size, Lift, Look.Material(Rune, Etched), Etched ? Look.HaloFor(Rune) : null, Col, false, (Etched ? "etch " : "paint ") + Rune.Art);
+            built = Trace.Build(Frame, Size, Lift, Look.Material(Rune, Etched), Etched ? Look.HaloFor(Rune) : null, Col, Glow, false, (Etched ? "etch " : "paint ") + Rune.Art);
             nextCheck = Time.time + 2f + Random.value;
             Grass.Set(this, built.OnGround, Frame, Size);
         }
@@ -180,21 +190,23 @@ namespace PotatoPainter
             float turn = player ? Mathf.Repeat(PlaceRotation(player) * PlaceRotationDegrees(player), 360f) : 0f;
             // Retraced when the aim moves (at most ten times a second), and twice a second when it doesn't, so new paint
             // nearby (layers) and pieces that load show up in the preview too.
-            bool moved = (eye - lastEye).sqrMagnitude >= 1e-4f || Vector3.Angle(dir, lastDir) > 0.05f || turn != lastTurn;
+            bool moved = (eye - lastEye).sqrMagnitude >= 1e-4f || Vector3.Angle(dir, lastDir) > 0.05f || turn != lastTurn || Settings.Version != lastSettings;
             if (Time.time - previewTime < (moved ? 0.1f : 0.5f)) return;
-            lastEye = eye; lastDir = dir; lastTurn = turn; previewTime = Time.time;
+            lastEye = eye; lastDir = dir; lastTurn = turn; lastSettings = Settings.Version; previewTime = Time.time;
+            // The panel's settings for this kind (kept until changed).
+            float size = Settings.Size; var col = Settings.Colour(Etched); var glow = Settings.GlowFor(Etched);
             preview?.Clear();
             // Grass is left out under the preview once the aim rests, and given back only when the aim leaves that spot
             // (test 0.1.7: the camera's own small movements gave it back and took it again twice a second, remaking four
             // grass patches each time).
-            aimValid = Trace.Aim(eye, dir, 50f, DefaultSize, cam.transform.right, turn, out aim)
+            aimValid = Trace.Aim(eye, dir, 50f, size, cam.transform.right, turn, out aim)
                 && (!player || Vector3.Distance(player.GetEyePoint(), aim.Center) <= player.m_maxPlaceDistance);
-            aimTime = Time.time; aimRune = Rune; aimEtched = Etched;
+            aimTime = Time.time; aimRune = Rune; aimEtched = Etched; aimSize = size; aimCol = col; aimGlow = glow;
             if (!aimValid) { Grass.Clear(this); ghostGrassAt = null; return; }
             if (ghostGrassAt.HasValue && Vector3.Distance(ghostGrassAt.Value, aim.Center) > 0.25f) { Grass.Clear(this); ghostGrassAt = null; }
-            aimLayer = LayerAt(aim.Center, DefaultSize, null);
-            preview = Trace.Build(aim, DefaultSize, 0.004f + 0.002f * aimLayer, Look.Material(Rune, Etched), Etched ? Look.HaloFor(Rune) : null, Look.RedOchre, true, "preview");
-            if (!moved && !ghostGrassAt.HasValue && preview.OnGround) { Grass.Set(this, true, aim, DefaultSize); ghostGrassAt = aim.Center; }
+            aimLayer = LayerAt(aim.Center, size, null);
+            preview = Trace.Build(aim, size, 0.004f + 0.002f * aimLayer, Look.Material(Rune, Etched), Etched ? Look.HaloFor(Rune) : null, col, glow, true, "preview");
+            if (!moved && !ghostGrassAt.HasValue && preview.OnGround) { Grass.Set(this, true, aim, size); ghostGrassAt = aim.Center; }
         }
 
         // On top of every loaded paint it overlaps (centres closer than 0.9 x their mean size, probe test 13).
