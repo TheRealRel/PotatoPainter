@@ -42,7 +42,41 @@ namespace PotatoPainter
             var sway = a + (b - a) * alpha;
             float len = v.magnitude;
             var moved = v + sway;
-            return moved.sqrMagnitude > 1e-12f ? moved.normalized * len : v;
+            var swayed = moved.sqrMagnitude > 1e-12f ? moved.normalized * len : v;
+            return swayed + Flutter(v, h, useUV2, m, t, w1, w2, alpha);
+        }
+
+        // Custom/Vegetation, ripple part (read from the DX11 deferred vertex program, raw operand swizzles decoded,
+        // 2026-10-30): added after the sway, in object space. Per global wind W: s = W.w * 0.5 + 0.5, ts = t s
+        // _RippleSpeed, A = sin(0.61234 ts + 10x + 10y); offset = (A sin(ts + 10x + 10y) 0.1, sin(ts + 10z + 10x) 0.05,
+        // A sin(ts + 10z + 10y) 0.1) x _RippleDistance x W.w x saturate((|v.xz| - _RippleDeadzoneMin) / (Max - Min)),
+        // x h too when _UV2Height is on; lerped from wind 1 to wind 2 by _GlobalWindAlpha. Inside the deadzone (a fir's
+        // trunk) nothing moves.
+        private static Vector3 Flutter(Vector3 v, float h, bool useUV2, Material m, float t, Vector4 w1, Vector4 w2, float alpha)
+        {
+            float rd = m.HasProperty("_RippleDistance") ? m.GetFloat("_RippleDistance") : 0f;
+            if (rd == 0f) return Vector3.zero;
+            float w = Weight(v, m);
+            if (w == 0f) return Vector3.zero;
+            float rs = m.GetFloat("_RippleSpeed");
+            Vector3 Block(Vector4 W)
+            {
+                float ts = t * (W.w * 0.5f + 0.5f) * rs;
+                float A = Mathf.Sin(0.61234f * ts + 10f * v.x + 10f * v.y);
+                float k = rd * w * W.w * (useUV2 ? h : 1f);
+                return new Vector3(A * Mathf.Sin(ts + 10f * v.x + 10f * v.y) * 0.1f, Mathf.Sin(ts + 10f * v.z + 10f * v.x) * 0.05f, A * Mathf.Sin(ts + 10f * v.z + 10f * v.y) * 0.1f) * k;
+            }
+            Vector3 a = Block(w1), b = Block(w2);
+            return a + (b - a) * alpha;
+        }
+
+        // How much of the ripple a vertex (object space) gets: 0 inside the deadzone, 1 outside it.
+        internal static float Weight(Vector3 v, Material m)
+        {
+            if (!m || !m.HasProperty("_RippleDistance") || m.GetFloat("_RippleDistance") == 0f) return 0f;
+            float min = m.GetFloat("_RippleDeadzoneMin"), max = m.GetFloat("_RippleDeadzoneMax");
+            float r = Mathf.Sqrt(v.x * v.x + v.z * v.z);
+            return max > min ? Mathf.Clamp01((r - min) / (max - min)) : (r > min ? 1f : 0f);
         }
 
         // Every frame, for the paint copies being drawn.

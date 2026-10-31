@@ -205,7 +205,7 @@ namespace PotatoPainter
                     // Trees: bent on the CPU exactly like the bark's triangles, when the bark has no flutter or push and every
                     // point landed on that one bark renderer (probe test 14). Otherwise drawn still.
                     bool sway = Bend.Sways(hostMat);
-                    bool cpu = sway && !preview && hostR && hostMat.GetFloat("_RippleDistance") == 0f && hostMat.GetFloat("_PushDistance") == 0f
+                    bool cpu = sway && !preview && hostR && hostMat.GetFloat("_PushDistance") == 0f
                         && Enumerable.Range(0, count).All(i => !ok[i] || hitR[i] == hostR);
                     // Built in the host's own space, so it moves with it and the game shows it with that detail level.
                     var parent = preview ? null : (cpu ? hostR.transform : lv.Parent);
@@ -353,9 +353,14 @@ namespace PotatoPainter
                 for (int sub = 0; sub < mesh.subMeshCount; sub++)
                 {
                     var mat = mats.Length == 0 ? null : mats[Mathf.Min(sub, mats.Length - 1)];
-                    if (IsFoliage(mat)) continue;   // never painted
-                    var st = mesh.GetTriangles(sub); tris.AddRange(st);
-                    for (int i = 0; i < st.Length / 3; i++) triMat.Add(mat);
+                    var st = mesh.GetTriangles(sub);
+                    var keep = Bark(mesh, sub, mat);   // leaves and needles are never painted
+                    for (int i = 0; i < st.Length / 3; i++)
+                    {
+                        if (keep != null && !keep[i]) continue;
+                        tris.Add(st[3 * i]); tris.Add(st[3 * i + 1]); tris.Add(st[3 * i + 2]);
+                        triMat.Add(mat);
+                    }
                 }
                 return new Surface { V = plain.V, T = tris.ToArray(), R = r, TriMat = triMat.ToArray(), UV2 = uv2 };
             }
@@ -427,12 +432,86 @@ namespace PotatoPainter
         // on the paint before it).
         internal static bool Ours(Renderer r) => r && r.name.StartsWith(Prefix, StringComparison.Ordinal);
 
-        // Leaves and other cards: Custom/Vegetation drawn two-sided (_Cull 0) or fluttering (_RippleDistance > 0).
-        private static bool IsFoliage(Material m)
+        // Leaves and needles are never painted. A beech or birch has its bark as its own material, but a mountain fir or
+        // Black Forest pine is one mesh and one fluttering, two-sided material for trunk and needles (test 0.2.3 log:
+        // FirTree, FirTree_small "nothing to paint"), and oak bark is two-sided too. What tells them apart is what's drawn:
+        // leaf and needle cards are mostly cut-out texture, bark is solid. So in a fluttering Custom/Vegetation material
+        // (_RippleDistance > 0) each connected piece of the mesh is bark when at least 95% of the texture under it is at or
+        // above the material's _Cutoff. Measured on the game's trees (meshes and textures read 2026-10-30): fir trunk 100%
+        // (needle cards 5 to 72%), pine trunk and thick branches 100% (needle cards 47% median), swamp tree bark 100% (twig
+        // cards 9%), beech, birch and oak leaf cards 22 to 30%. Materials that don't flutter (bark, oak bark) are bark.
+        // The paint follows the flutter too (Bend.Flutter). Null = every triangle.
+        private const float BarkSolid = 0.95f;
+        private static readonly Dictionary<(Mesh, int, Material), bool[]> barkCache = new Dictionary<(Mesh, int, Material), bool[]>();
+        private static readonly Dictionary<Texture, Color32[]> alphaCache = new Dictionary<Texture, Color32[]>();
+        private const int AlphaSize = 256;
+
+        private static bool[] Bark(Mesh mesh, int sub, Material m)
         {
-            if (!m || !m.shader || m.shader.name != "Custom/Vegetation") return false;
-            return (m.HasProperty("_Cull") && m.GetFloat("_Cull") == 0f) || (m.HasProperty("_RippleDistance") && m.GetFloat("_RippleDistance") > 0f);
+            if (!IsFoliage(m)) return null;
+            var key = (mesh, sub, m);
+            if (barkCache.TryGetValue(key, out var keep)) return keep;
+            var t = mesh.GetTriangles(sub);
+            int n = t.Length / 3;
+            keep = new bool[n];
+            var alpha = Alpha(m.mainTexture);
+            var uv = mesh.uv;
+            if (alpha == null || uv == null || uv.Length != mesh.vertexCount) { barkCache[key] = keep; return keep; }   // nothing painted
+            float cutoff = m.HasProperty("_Cutoff") ? m.GetFloat("_Cutoff") : 0.5f;
+            var st = m.HasProperty("_MainTex_ST") ? m.GetVector("_MainTex_ST") : new Vector4(1f, 1f, 0f, 0f);
+            // Connected pieces (triangles sharing vertices).
+            var parent = new int[mesh.vertexCount]; for (int i = 0; i < parent.Length; i++) parent[i] = i;
+            int Find(int x) { while (parent[x] != x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; }
+            for (int i = 0; i < n; i++) { int a = Find(t[3 * i]), b = Find(t[3 * i + 1]); if (a != b) parent[a] = b; int c = Find(t[3 * i + 2]); b = Find(t[3 * i + 1]); if (c != b) parent[c] = b; }
+            // Per piece: share of texture samples at or above the cut-out (six inside each triangle).
+            var solid = new Dictionary<int, (int s, int all)>();
+            var w = new[] { new Vector3(1f / 3f, 1f / 3f, 1f / 3f), new Vector3(0.6f, 0.2f, 0.2f), new Vector3(0.2f, 0.6f, 0.2f), new Vector3(0.2f, 0.2f, 0.6f), new Vector3(0.45f, 0.45f, 0.1f), new Vector3(0.1f, 0.45f, 0.45f) };
+            byte cut = (byte)Mathf.Clamp(Mathf.CeilToInt(cutoff * 255f), 0, 255);
+            for (int i = 0; i < n; i++)
+            {
+                Vector2 a = uv[t[3 * i]], b = uv[t[3 * i + 1]], c = uv[t[3 * i + 2]];
+                int root = Find(t[3 * i]);
+                solid.TryGetValue(root, out var cnt);
+                foreach (var k in w)
+                {
+                    var p = a * k.x + b * k.y + c * k.z;
+                    float u = p.x * st.x + st.z, v = p.y * st.y + st.w;
+                    int x = Mathf.Clamp((int)((u - Mathf.Floor(u)) * AlphaSize), 0, AlphaSize - 1), y = Mathf.Clamp((int)((v - Mathf.Floor(v)) * AlphaSize), 0, AlphaSize - 1);
+                    cnt.all++; if (alpha[y * AlphaSize + x].a >= cut) cnt.s++;
+                }
+                solid[root] = cnt;
+            }
+            for (int i = 0; i < n; i++) { var cnt = solid[Find(t[3 * i])]; keep[i] = cnt.all > 0 && cnt.s >= cnt.all * BarkSolid; }
+            barkCache[key] = keep;
+            // Test data (0.2.4: bark in fluttering tree materials). Taken out before release.
+            var pieces = solid.Where(kv => kv.Value.all > 0).Select(kv => (float)kv.Value.s / kv.Value.all).OrderByDescending(x => x).ToList();
+            Plugin.Log.LogInfo($"Bark on {mesh.name} ({m.name}): {keep.Count(k => k)} of {n} triangles in {pieces.Count(x => x >= BarkSolid)} of {pieces.Count} pieces; solid texture per piece {string.Join(" ", pieces.Take(8).Select(x => x.ToString("0.00")))}{(pieces.Count > 8 ? " ..." : "")}");
+            return keep;
         }
+
+        // A texture's pixels at 256 px, read back through the GPU (the game's textures aren't readable).
+        private static Color32[] Alpha(Texture tex)
+        {
+            if (!tex) return null;
+            if (alphaCache.TryGetValue(tex, out var px)) return px;
+            var rt = RenderTexture.GetTemporary(AlphaSize, AlphaSize, 0, RenderTextureFormat.ARGB32, RenderTextureReadWrite.Linear);
+            var active = RenderTexture.active;
+            try
+            {
+                Graphics.Blit(tex, rt);
+                RenderTexture.active = rt;
+                var read = new Texture2D(AlphaSize, AlphaSize, TextureFormat.RGBA32, false, true);
+                read.ReadPixels(new Rect(0, 0, AlphaSize, AlphaSize), 0, 0);
+                read.Apply(false);
+                px = read.GetPixels32();
+                UnityEngine.Object.Destroy(read);
+            }
+            finally { RenderTexture.active = active; RenderTexture.ReleaseTemporary(rt); }
+            alphaCache[tex] = px;
+            return px;
+        }
+
+        private static bool IsFoliage(Material m) => m && m.shader && m.shader.name == "Custom/Vegetation" && m.HasProperty("_RippleDistance") && m.GetFloat("_RippleDistance") > 0f;
 
         private static bool Snow(Renderer r) => r.sharedMaterials.Any(m => m && m.shader && m.shader.name.IndexOf("Snow", StringComparison.OrdinalIgnoreCase) >= 0);
 

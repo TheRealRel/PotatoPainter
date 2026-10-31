@@ -1,3 +1,6 @@
+## 0.2.4 (test build, not released)
+- Runes can be painted on mountain firs, Black Forest pines, swamp trees and oaks (their trunks and thick branches, never needles or leaves), and move with the tree in the wind.
+
 ## 0.2.3 (test build, not released)
 - Test build: writes why a spot can't be painted to the log.
 
