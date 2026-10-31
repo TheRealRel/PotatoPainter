@@ -1,3 +1,6 @@
+## 0.3.3 (test build, not released)
+- One set of runes instead of a set per rune row: every rune shape once, 51 in all, under "Runes: Painted" and "Runes: Etched". Shapes the rows share list the other names in their description. The short-twig runes are ordinary runes in the set, so the Style button is gone.
+
 ## 0.3.2 (test build, not released)
 - The Younger Futhark (16 runes) and the Anglo-Saxon futhorc (28 runes and its 6 later additions), painted and etched, each in its own tabs.
 - A Style button on the panel for the Younger Futhark switches between long-branch and short-twig runes.
