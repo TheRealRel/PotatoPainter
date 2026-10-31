@@ -1,3 +1,7 @@
+## 0.4.0 (test build, not released)
+- Symbols, painted and etched, under "Symbols: Painted" and "Symbols: Etched": a left and a right hand print from the start; Vegvísir, Huginn and Muninn, Sleipnir and Gungnir after Eikthyr; Yggdrasil, the Web of Wyrd, the troll cross and a knotwork Mjölnir after The Elder; the Valknut, Mjölnir, the triple horn and a bloody hand print after Bonemass.
+- A boss's symbols show up once the boss is down in the world, or once your character has defeated it.
+
 ## 0.3.3 (test build, not released)
 - One set of runes instead of a set per rune row: every rune shape once, 51 in all, under "Runes: Painted" and "Runes: Etched". Shapes the rows share list the other names in their description. The short-twig runes are ordinary runes in the set, so the Style button is gone.
 

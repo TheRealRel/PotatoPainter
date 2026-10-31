@@ -23,7 +23,7 @@ namespace PotatoPainter
     [NetworkCompatibility(CompatibilityLevel.EveryoneMustHaveMod, VersionStrictness.Minor)]
     public class Plugin : BaseUnityPlugin
     {
-        public const string Id = "potato.painter", Version = "0.3.3";
+        public const string Id = "potato.painter", Version = "0.4.0";
         // Saved in worlds and inventories: never rename.
         public const string ToolPrefab = "potato_runakefli";
         public const string TablePrefab = "_PotatoRunakefliPieceTable";
@@ -63,6 +63,7 @@ namespace PotatoPainter
                 { "msg_potato_paint_repeat", "Already painted there" },
                 { "msg_potato_etch_nosurface", "Nothing to etch there" },
                 { "msg_potato_etch_repeat", "Already etched there" },
+                { "msg_potato_symbol_locked", "You haven't unlocked this symbol yet" },
             };
             foreach (var rune in Runes.All)
             {
@@ -74,7 +75,7 @@ namespace PotatoPainter
             catch (Exception e) { Log.LogError("Couldn't add the Rúnakefli and its runes: " + e); }
         }
 
-        // The Rúnakefli's own build menu. Its tabs come from each piece's Category (one per rune row; piece tables don't
+        // The Rúnakefli's own build menu. Its tabs come from each piece's Category (Runes and Symbols; piece tables don't
         // own categories since Valheim 1.0, per Jötunn). The game's remove is off for it: it removes the piece whose
         // collider the aim hits, and a paint has none, so it would take the wall under the paint (Player.RemovePiece).
         private static void AddTable()
@@ -138,7 +139,7 @@ namespace PotatoPainter
                 }
                 added++;
             }
-            Log.LogInfo($"Rúnakefli ready: {added} of {Runes.All.Count} runes drawn so far, painted and etched.");
+            Log.LogInfo($"Rúnakefli ready: {added} of {Runes.All.Count} designs ({Runes.All.Count(r => r.Row != Runes.Symbols)} runes, {Runes.All.Count(r => r.Row == Runes.Symbols)} symbols), painted and etched.");
         }
 
         private void Update()
@@ -191,7 +192,9 @@ namespace PotatoPainter
                 if (___m_placementMarkerInstance) ___m_placementMarkerInstance.SetActive(false);
                 refused = null;
                 if (___m_placementStatus != Player.PlacementStatus.Valid) return;
-                refused = Paint.Refusal();
+                // A symbol not unlocked yet can't be painted (the menu leaves it out; this covers a selection kept from before).
+                if (!Unlock.Open(__instance.GetSelectedPiece(), __instance)) refused = "$msg_potato_symbol_locked";
+                else refused = Paint.Refusal();
                 if (refused != null) ___m_placementStatus = Player.PlacementStatus.Invalid;
             }
         }

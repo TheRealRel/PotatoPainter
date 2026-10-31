@@ -1,4 +1,5 @@
-// The Rúnakefli's designs, organized as in claude/potatopainter-runes.md: by row, in the row's own order, by ætt.
+// The Rúnakefli's designs, organized as in claude/potatopainter-runes.md: by row, in the row's own order, by ætt; then the
+// symbols.
 // A design is only offered once its drawing exists (assets/runes/<Art>.png, embedded in the DLL).
 using System.Collections.Generic;
 using System.IO;
@@ -18,14 +19,18 @@ namespace PotatoPainter
         internal string DescriptionToken => "piece_" + Prefab + "_description";
         // The build menu tabs: "Runes: Painted" and "Runes: Etched" (Painted and Etched apart, the user 2026-10-30; one set of
         // runes for every rune row, the user 2026-10-31).
-        internal string Tab(bool etched) => "Runes" + (etched ? ": Etched" : ": Painted");
+        // Symbols get their own tabs, "Symbols: Painted" and "Symbols: Etched" (the user, 2026-10-31).
+        internal string Tab(bool etched) => (Row == Runes.Symbols ? "Symbols" : "Runes") + (etched ? ": Etched" : ": Painted");
+        // A symbol a boss unlocks: the boss's prefab name (its Character.m_defeatSetGlobalKey is the key); null when open
+        // from the start.
+        internal string Boss;
         // Where the same shape is a rune of the other rows too: their names, shown under the note.
         internal string Also;
     }
 
     internal static class Runes
     {
-        internal const string Elder = "Elder Futhark", Younger = "Younger Futhark", ShortTwig = "Younger Futhark, short-twig", Futhorc = "Anglo-Saxon futhorc";
+        internal const string Elder = "Elder Futhark", Younger = "Younger Futhark", ShortTwig = "Younger Futhark, short-twig", Futhorc = "Anglo-Saxon futhorc", Symbols = "Symbols";
 
         // One set of runes (the user, 2026-10-31: the rows' duplicates were redundant): every shape once, 51 in all. First the
         // Elder Futhark, then the shapes the Younger Futhark adds (long-branch, then short-twig), then the futhorc's. A shape
@@ -123,6 +128,27 @@ namespace PotatoPainter
             ("t", "Dagaz", "d", "ᛞ", "elder_dagaz", "Day", "Stands for hope and happiness."), ("t", "Ōþala", "o", "ᛟ", "elder_othala", "Heritage, estate", "Stands for a home with justice and plenty."),
         };
 
+        // The symbols (agreed with the user 2026-10-31; claude/potatopainter-plan.md, "Symbols"): the left and right hand open
+        // from the start, the rest four per boss, Eikthyr, The Elder, Bonemass (the user: "split it evenly amongst the first
+        // three bosses"). Drawings: _work-2026-10-29\painter-lods\symbols and \hands. Boss: prefab name, or null.
+        private static readonly (string name, string art, string boss, string meaning, string note)[] SymbolList =
+        {
+            ("Hand, left", "symbol_hand_left", null, "A hand print", "A left hand pressed in paint."),
+            ("Hand, right", "symbol_hand_right", null, "A hand print", "A right hand pressed in paint."),
+            ("Vegvísir", "symbol_vegvisir", "Eikthyr", "Wayfinder", "From an Icelandic book of magic staves (the Huld manuscript, about 1860): whoever carries it won't lose the way in storms or bad weather."),
+            ("Huginn and Muninn", "symbol_ravens", "Eikthyr", "Thought and Memory", "Óðinn's two ravens, who fly over the world each day and bring him news. Drawn after the raven on a York penny of about 940."),
+            ("Sleipnir", "symbol_sleipnir", "Eikthyr", "Óðinn's eight-legged horse", "The best of all horses. Drawn after the Ardre VIII picture stone from Gotland."),
+            ("Gungnir", "symbol_gungnir", "Eikthyr", "Óðinn's spear", "Made by the sons of Ívaldi. The sign is modern."),
+            ("Yggdrasil", "symbol_yggdrasil", "gd_king", "The World Tree", "The great ash whose roots and branches reach through the nine worlds."),
+            ("Web of Wyrd", "symbol_wyrd", "gd_king", "Fate", "Nine staves that hold every rune. A modern sign (Jan Fries, 1993)."),
+            ("Troll cross", "symbol_troll_cross", "gd_king", "Protection", "Worn against trolls and evil. A modern sign, first made by a smith in the late 1990s."),
+            ("Mjölnir, knotwork", "symbol_mjolnir_knot", "gd_king", "Þórr's hammer", "With a braid down the handle and a triquetra on the head, like many modern pendants."),
+            ("Valknut", "symbol_valknut", "Bonemass", "Knot of the slain", "Three linked triangles, carved on Gotland picture stones beside Óðinn and the dead. The name is modern."),
+            ("Mjölnir", "symbol_mjolnir", "Bonemass", "Þórr's hammer", "Drawn after a silver hammer pendant from Skåne, Sweden."),
+            ("Triple Horn", "symbol_triple_horn", "Bonemass", "Three drinking horns", "Linked horns, carved on the Snoldelev Stone in Denmark in the 800s."),
+            ("Hand, bloody", "symbol_hand_bloody", "Bonemass", "A bloody hand print", "Left by a hand fresh from battle."),
+        };
+
         internal static readonly List<Rune> All = new List<Rune>();
 
         static Runes()
@@ -141,6 +167,11 @@ namespace PotatoPainter
                 }
             }
             Add(Younger, YoungerRunes); Add(ShortTwig, ShortTwigRunes); Add(Futhorc, FuthorcRunes);
+            for (int i = 0; i < SymbolList.Length; i++)
+            {
+                var r = SymbolList[i];
+                All.Add(new Rune { Row = Symbols, Aett = "", Position = i + 1, Name = r.name, Sound = "", Letter = "", Art = r.art, Boss = r.boss, Meaning = r.meaning, Note = r.note });
+            }
             foreach (var rune in All) if (AlsoNames.TryGetValue(rune.Art, out var also)) rune.Also = also;
         }
 
