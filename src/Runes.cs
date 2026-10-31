@@ -74,8 +74,29 @@ namespace PotatoPainter
             }
         }
 
+        // The name as the game's menus can show it. Valheim's UI fonts (AveriaSerifLibre, AveriaSansLibre; checked in
+        // resources.assets 2026-10-30) have no ā ē ī ō ū ą ę, so those marks are dropped (the 0.1.1 video showed "Isaz"
+        // for Īsaz); þ is in the font and stays. Ī(h)waz is shown as Ihwaz.
+        internal static string Shown(Rune rune) => rune.Name == "Ī(h)waz" ? "Ihwaz" : Plain(rune.Name);
+
+        internal static string Plain(string text)
+        {
+            var sb = new System.Text.StringBuilder();
+            foreach (var c in text)
+                switch (c)
+                {
+                    case 'Ā': sb.Append('A'); break; case 'ā': case 'ą': sb.Append('a'); break;
+                    case 'Ē': sb.Append('E'); break; case 'ē': case 'ę': sb.Append('e'); break;
+                    case 'Ī': sb.Append('I'); break; case 'ī': sb.Append('i'); break;
+                    case 'Ō': sb.Append('O'); break; case 'ō': sb.Append('o'); break;
+                    case 'Ū': sb.Append('U'); break; case 'ū': sb.Append('u'); break;
+                    default: sb.Append(c); break;
+                }
+            return sb.ToString();
+        }
+
         // The build menu's text under the name: the rune's meaning, then a short line on what it stood for (the user,
         // 2026-10-30).
-        internal static string Describe(Rune rune) => rune.Meaning + "\n" + rune.Note;
+        internal static string Describe(Rune rune) => Plain(rune.Meaning + "\n" + rune.Note);
     }
 }

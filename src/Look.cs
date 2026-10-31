@@ -34,7 +34,7 @@ namespace PotatoPainter
             return t;
         }
 
-        // Painted: the leaf look in the paint's own colour. Etched: the same, glowing ember at strength 1 like the runes on
+        // Painted: the leaf look in the paint's own colour (it keeps the leaf's normal map and its snow and rain). Etched: the same, glowing ember at strength 1 like the runes on
         // the Rúnakefli (probe test 22: ember keeps its colour up to 1 to 1.5 at night, whiter above).
         internal static Material Material(Rune rune, bool etched)
         {
@@ -43,6 +43,9 @@ namespace PotatoPainter
             var tex = Texture(rune);
             if (!Leaf() || !tex) return null;
             m = etched ? Paint(key, tex, RedOchre, Ember, 1f) : new Material(leaf) { name = "PotatoPainter " + key, mainTexture = tex };
+            // Etched runes are lit evenly: no bumps from the beech leaf's own normal map (beech_leaf_n, laid over every
+            // rune's square), which painted runes keep for a painted look (the user, 2026-10-30).
+            if (etched && m && m.HasProperty("_BumpMap")) m.SetTexture("_BumpMap", null);
             materials[key] = m;
             return m;
         }

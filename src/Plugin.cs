@@ -23,7 +23,7 @@ namespace PotatoPainter
     [NetworkCompatibility(CompatibilityLevel.EveryoneMustHaveMod, VersionStrictness.Minor)]
     public class Plugin : BaseUnityPlugin
     {
-        public const string Id = "potato.painter", Version = "0.2.4";
+        public const string Id = "potato.painter", Version = "0.3.0";
         // Saved in worlds and inventories: never rename.
         public const string ToolPrefab = "potato_runakefli";
         public const string TablePrefab = "_PotatoRunakefliPieceTable";
@@ -66,7 +66,7 @@ namespace PotatoPainter
             };
             foreach (var rune in Runes.All)
             {
-                words[rune.NameToken] = rune.Name;
+                words[rune.NameToken] = Runes.Shown(rune);
                 words[rune.DescriptionToken] = Runes.Describe(rune);
             }
             LocalizationManager.Instance.GetLocalization().AddTranslation("English", words);

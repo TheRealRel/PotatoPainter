@@ -1,3 +1,8 @@
+## 0.3.0 (test build, not released)
+- All 24 Elder Futhark runes, painted and etched. Jera's two hooks sit side by side.
+- Rune names and descriptions are spelled without the long-vowel marks the game's font can't show (Isaz, Raido, Tiwaz).
+- Etched runes are lit evenly; painted runes keep their slight texture.
+
 ## 0.2.4 (test build, not released)
 - Runes can be painted on mountain firs, Black Forest pines, swamp trees and oaks (their trunks and thick branches, never needles or leaves), and move with the tree in the wind.
 
