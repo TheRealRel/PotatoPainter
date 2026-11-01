@@ -41,10 +41,11 @@ namespace PotatoPainter
         internal bool Lit;   // an etched paint's own light (RuneLight); etched paints from before 0.4.3 have it on
         // Glow: the kept value is a share of the colour's cap (0.4.4 on) or an absolute strength (before).
         internal bool GlowShare;
-        // Drawn: dimmed in sunlight (SunDim, 0.4.9): surface colour and glow times Dim. The saved Col and Glow never change.
-        internal float Dim = 1f, SurfDim = 1f;
+        // Drawn: the glow dimmed in sunlight (SunDim, 0.4.9), times Dim; the surface colour is always the painted one (0.4.13).
+        // The saved Col and Glow never change.
+        internal float Dim = 1f;
         internal Color Emission { get { if (!Etched) return Color.black; var e = GlowCap.Emission(Glow, GlowShare) * Dim; e.a = 1f; return e; } }
-        internal Color DrawCol { get { if (!Etched) return Col; var c = Col * SurfDim; c.a = 1f; return c; } }
+        internal Color DrawCol => Col;
         // The glow's share of its cap (older absolute strengths: their strength over the cap).
         internal float Share => !Etched ? 0f : GlowShare ? Mathf.Clamp01(Glow.maxColorComponent) : Mathf.Clamp01(Glow.maxColorComponent / Mathf.Max(GlowCap.Cap(Glow, GlowCap.Bloom), 1e-3f));
         private float nextSun;
@@ -199,6 +200,9 @@ namespace PotatoPainter
             if (Etched) { UpdateDim(); nextSun = Time.time + 2f + Random.value; }
             job = Trace.Job.Prepare(Frame, Size, Lift, Look.Material(Rune, Etched), Etched ? Look.HaloFor(Rune) : null, DrawCol, Emission, false, (Etched ? "etch " : "paint ") + Rune.Art);
             Perf.Stop("paint trace: read hosts", sw);
+            // Test-only: a twin read at the same moment, computed on the game thread when the background one is done.
+            twin = checksLeft > 0 ? Trace.Job.Prepare(job.F, job.Size, job.Lift, job.Material, job.Halo, job.Col, job.Glow, false, job.Name + " twin") : null;
+            prepareTime = Time.time;
             Trace.Run(job);
             nextCheck = Time.time + 2f + Random.value;
         }
@@ -219,40 +223,50 @@ namespace PotatoPainter
             }
             if (Etched) Retint();   // the sun may have moved while it traced
             Grass.Set(this, built.OnGround, Frame, Size);
-            if (checksLeft > 0 && !j.Done) Check(j);
+            if (twin != null && checksLeft > 0 && !j.Done) Check(j); twin = null;
         }
 
-        // Test-only (0.4.12): the first few traces finished from the thread pool are traced again the old way, all on the
-        // game thread, and the sheets compared point for point. Taken out before release.
-        private static int checksLeft = 12;
+        // Test-only (0.4.12, 0.4.13): the first traces finished from the thread pool are compared point for point with
+        // (a) a twin read at the same moment and computed on the game thread (same world: tells the thread apart) and
+        // (b) a trace done all on the game thread now (the world may have changed since: hosts loading in). Taken out before release.
+        private static int checksLeft = 24;
+        private Trace.Job twin; private float prepareTime;
         private void Check(Trace.Job j)
         {
             checksLeft--;
-            var sync = Trace.Build(j.F, j.Size, j.Lift, j.Material, j.Halo, j.Col, j.Glow, false, j.Name + " check");
+            Built tw = twin.Done ? twin.Finish() : null;
+            if (tw == null) { twin.Compute(); tw = twin.Finish(); }
+            var now = Trace.Build(j.F, j.Size, j.Lift, j.Material, j.Halo, j.Col, j.Glow, false, j.Name + " check");
+            Plugin.Log.LogInfo($"Trace thread check ({Rune?.Art}, size {Size:0.0}, read {Time.time - prepareTime:0.00} s ago): background {Describe(built)}; " +
+                $"twin on the game thread {Describe(tw)}, {Compare(built, tw)}; traced again now {Describe(now)}, {Compare(built, now)}");
+            tw.Clear(); now.Clear();
+        }
+        private static string Describe(Built b) => $"{b.Sheets} sheets, {b.Strokes.Count} strokes, {b.Hosts.Count} hosts";
+        private static string Compare(Built a, Built b)
+        {
+            if (a.Sheets != b.Sheets || a.Strokes.Count != b.Strokes.Count) return "sheet counts differ" + (a.Hosts.SetEquals(b.Hosts) ? " (same hosts)" : " (other hosts)");
             int diff = 0, points = 0;
-            bool same = sync.Sheets == built.Sheets && sync.Strokes.Count == built.Strokes.Count;
-            for (int i = 0; same && i < sync.Strokes.Count; i++)
+            for (int i = 0; i < a.Strokes.Count; i++)
             {
-                var a = built.Strokes[i] ? built.Strokes[i].GetComponent<MeshFilter>()?.sharedMesh : null;
-                var b = sync.Strokes[i] ? sync.Strokes[i].GetComponent<MeshFilter>()?.sharedMesh : null;
-                if (!a || !b) { same = false; break; }
-                var va = a.vertices; var vb = b.vertices; var ta = a.triangles; var tb = b.triangles;
-                if (va.Length != vb.Length || ta.Length != tb.Length) { same = false; break; }
+                var ma = a.Strokes[i] ? a.Strokes[i].GetComponent<MeshFilter>()?.sharedMesh : null;
+                var mb = b.Strokes[i] ? b.Strokes[i].GetComponent<MeshFilter>()?.sharedMesh : null;
+                if (!ma || !mb) return $"sheet {i} missing in {(!ma ? "the first" : "the second")}";
+                var va = ma.vertices; var vb = mb.vertices; var ta = ma.triangles; var tb = mb.triangles;
+                if (va.Length != vb.Length || ta.Length != tb.Length) return $"sheet {i} sizes differ ({va.Length} against {vb.Length} points)";
                 for (int v = 0; v < va.Length; v++) { points++; if (va[v] != vb[v]) diff++; }
                 for (int t = 0; t < ta.Length; t++) if (ta[t] != tb[t]) diff++;
-                if (built.Strokes[i].transform.parent != sync.Strokes[i].transform.parent) diff++;
+                if (a.Strokes[i].transform.parent != b.Strokes[i].transform.parent) diff++;
             }
-            sync.Clear();
-            Plugin.Log.LogInfo($"Trace thread check ({Rune?.Art}, size {Size:0.0}): {built.Sheets} sheets, {points} points, {(same ? diff + " different" : "sheet counts or sizes differ")} from tracing it all on the game thread");
+            return $"{points} points, {diff} different";
         }
 
         // The sun dimming now (SunDim); true when it moved enough to redraw.
         private bool UpdateDim()
         {
             float day = SunDim.Day(), sun = SunDim.Sun(Frame, Size);
-            float f = SunDim.Factor(Glow, Share, day, sun, GlowCap.Bloom), s = SunDim.SurfaceFactor(f, sun);
-            if (Mathf.Abs(f - Dim) <= 0.01f && Mathf.Abs(s - SurfDim) <= 0.01f) return false;
-            Dim = f; SurfDim = s;
+            float f = SunDim.Factor(Glow, Share, day, sun, GlowCap.Bloom);
+            if (Mathf.Abs(f - Dim) <= 0.01f) return false;
+            Dim = f;
             return true;
         }
 
@@ -343,9 +357,9 @@ namespace PotatoPainter
             aimLayer = LayerAt(aim.Center, size, null);
             if (Etched)
             {
-                // Dimmed in sunlight like the placed rune will be (SunDim).
-                float sunAt = SunDim.Sun(aim, size), df = SunDim.Factor(kept, Settings.Glow, SunDim.Day(), sunAt, GlowCap.Bloom);
-                col *= SunDim.SurfaceFactor(df, sunAt); col.a = 1f; glow *= df; glow.a = 1f;
+                // The glow dimmed in sunlight like the placed rune's will be (SunDim).
+                float df = SunDim.Factor(kept, Settings.Glow, SunDim.Day(), SunDim.Sun(aim, size), GlowCap.Bloom);
+                glow *= df; glow.a = 1f;
             }
             var sw = Perf.Start();
             preview = Trace.Build(aim, size, 0.004f + 0.002f * aimLayer, Look.Material(Rune, Etched), Etched ? Look.HaloFor(Rune) : null, col, glow, true, "preview");

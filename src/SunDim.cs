@@ -10,7 +10,9 @@
 // night (1, no dimming: the caps are night limits) and shade at midday, and by the sun reaching the rune (sunlit share of
 // five rays x sun strength / 1.70) between shade and sunlit. Reproduces every midday reading; 0.4.9's morning check held
 // (and dimmed a little more than needed). Moonlight isn't counted (no moonlit rune was measured; the caps are night limits).
-// The glow's multiplier is f (its cap carries the 15% margin); the surface colour's is f, 15% lower in full sun.
+// The glow's multiplier is f (its cap carries the 15% margin). The surface colour isn't dimmed (0.4.13; the user, 2026-11-01:
+// "our daylight dimming is going overboard", chose "Paint true, glow dims"): it looked dull in sunlight, and the game
+// dims nothing of its own in daylight.
 using UnityEngine;
 
 namespace PotatoPainter
@@ -39,10 +41,6 @@ namespace PotatoPainter
         private static readonly float NightAmbient = Lum(new Color(0.357f, 0.368f, 0.485f)), DayAmbient = Lum(new Color(0.463f, 0.574f, 0.706f));
 
         private static float Lum(Color c) => 0.2126f * c.r + 0.7152f * c.g + 0.0722f * c.b;
-
-        // The surface colour's multiplier: f, and in sunlight 15% lower again (0.4.10's margin, GlowCap.Margin): the glow already
-        // carries the margin in its cap, and the surface is what washes out in the sun (shade and night: surface alone held).
-        internal static float SurfaceFactor(float f, float sun) => f * (1f - (1f - GlowCap.Margin) * Mathf.Clamp01(sun));
 
         internal static float Factor(Color glow, float share, float day, float sun, bool bloom)
         {
