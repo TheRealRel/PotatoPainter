@@ -53,6 +53,9 @@ namespace PotatoPainter
     internal static class Trace
     {
         internal const string Prefix = "PotatoPainter ";
+        // Test-only (0.4.8): placed traces also cast the close-up points the owner pass already found, and count differences.
+        internal const bool Check = true;
+        private static int CheckN, CheckDiff;
         internal static readonly int Mask = LayerMask.GetMask("Default", "static_solid", "Default_small", "piece", "terrain", "vehicle", "piece_nonsolid");
 
         internal sealed class Surface { internal Vector3[] V; internal int[] T; internal Renderer R; internal Material[] TriMat; internal Vector2[] UV2; }
@@ -112,7 +115,10 @@ namespace PotatoPainter
         internal static Built Build(Frame f, float size, float lift, Material material, Material halo, Color col, Color glow, bool preview, string name)
         {
             var built = new Built();
+            string tk = preview ? "preview" : "paint";   // test-only timing keys (Perf, 0.4.8)
+            var sw = Perf.Start();
             var hosts = Hosts(f.Center, size, null);
+            Perf.Stop(tk + " trace: read hosts", sw, hosts.Count);
             // The same set the paint compares against later (HostIds), so it only rebuilds when it really changed.
             built.Hosts.UnionWith(HostIds(f.Center, size));
             if (hosts.Count == 0 || !material) return built;
@@ -143,19 +149,30 @@ namespace PotatoPainter
                 return ix;
             }
 
-            // Which host owns each point: the one whose close-up surface is on top there.
+            // Which host owns each point: the one whose close-up surface is on top there. The owner's hit is kept (0.4.8):
+            // the close-up sheet of a host traces the same points on the same triangles, so it is used again there.
+            sw = Perf.Start();
             var owner = new int[count]; for (int i = 0; i < count; i++) owner[i] = -1;
+            var oAt = new Vector3[count]; var oN = new Vector3[count]; var oS = new Surface[count]; var oT = new int[count]; var oU = new Vector2[count];
             var nearRef = hosts.Select(h => Near(h.Reference, f.Center, radius)).ToList();
             for (int i = 0; i < count; i++)
             {
                 float best = float.MaxValue;
                 for (int k = 0; k < hosts.Count; k++)
-                    if (Cast(Ix(nearRef[k]), nearRef[k], starts[i], -n, reach * 2f, plane, out var at, out _, out _, out _, out _))
+                    if (Cast(Ix(nearRef[k]), nearRef[k], starts[i], -n, reach * 2f, plane, out var at, out var an, out var hs0, out var ht0, out var hu0))
                     {
                         float d = Vector3.Distance(starts[i], at);
-                        if (d < best) { best = d; owner[i] = k; }
+                        if (d < best) { best = d; owner[i] = k; oAt[i] = at; oN[i] = an; oS[i] = hs0; oT[i] = ht0; oU[i] = hu0; }
                     }
             }
+            // A host whose close-up surfaces are exactly one detail level (the usual case: one of new, worn or broken is
+            // shown): that level traced on Near(the same list) gives the same hits as the owner pass, point for point.
+            var reuse = hosts.Select(h =>
+            {
+                var close = h.Levels.Where(l => l.Active && l.Index == 0).ToList();
+                return close.Count == 1 && close[0].Surfaces.SequenceEqual(h.Reference);
+            }).ToArray();
+            Perf.Stop(tk + " trace: owner casts", sw, count * hosts.Count);
             // The host the centre is painted on: the paint goes when it's destroyed.
             {
                 float best = float.MaxValue;
@@ -190,12 +207,33 @@ namespace PotatoPainter
                     // The surface material where the centre lands on this model: trees bend in the wind.
                     Material hostMat = null; Renderer hostR = null;
                     if (Cast(Ix(surfaces), surfaces, f.Center + n * reach, -n, reach * 2f, plane, out _, out _, out var cs, out var ct, out _) && cs.R && cs.TriMat != null) { hostMat = cs.TriMat[ct]; hostR = cs.R; }
+                    sw = Perf.Start(); int casts = 0;
+                    bool closeUp = lv.Active && lv.Index == 0;
                     for (int i = 0; i < count; i++)
                     {
                         if (owner[i] < 0) continue;
                         // A corner on another piece (a seam) is traced on that piece, at the same detail level.
-                        var on = owner[i] == k ? surfaces : Other(owner[i], lv);
-                        if (Cast(Ix(on), on, starts[i], -n, reach * 2f, plane, out var at, out var nn, out var hs, out var ht, out var u2))
+                        Vector3 at, nn; Surface hs; int ht; Vector2 u2; bool hit;
+                        if (closeUp && reuse[owner[i]])
+                        {
+                            hit = true; at = oAt[i]; nn = oN[i]; hs = oS[i]; ht = oT[i]; u2 = oU[i];
+                            if (Check && !preview)
+                            {
+                                // Test-only (0.4.8): the cast it replaces, compared.
+                                var on0 = owner[i] == k ? surfaces : Other(owner[i], lv);
+                                bool h2 = Cast(Ix(on0), on0, starts[i], -n, reach * 2f, plane, out var a2, out var n2, out var s2, out var t2, out var v2);
+                                CheckN++;
+                                if (!h2 || a2 != at || n2 != nn || t2 != ht || v2 != u2 || s2 == null || s2.R != hs.R || s2.V != hs.V
+                                    || s2.T[3 * t2] != hs.T[3 * ht] || s2.T[3 * t2 + 1] != hs.T[3 * ht + 1] || s2.T[3 * t2 + 2] != hs.T[3 * ht + 2]) CheckDiff++;
+                            }
+                        }
+                        else
+                        {
+                            var on = owner[i] == k ? surfaces : Other(owner[i], lv);
+                            hit = Cast(Ix(on), on, starts[i], -n, reach * 2f, plane, out at, out nn, out hs, out ht, out u2);
+                            casts++;
+                        }
+                        if (hit)
                         {
                             verts[i] = at + nn * lift; normals[i] = nn; uv2s[i] = u2; ok[i] = true;
                             hitR[i] = hs.R;
@@ -204,6 +242,8 @@ namespace PotatoPainter
                             bary[i] = Barycentric(at, hs.V[i0], hs.V[i1], hs.V[i2]);
                         }
                     }
+                    Perf.Stop(tk + " trace: sheet casts", sw, casts);
+                    sw = Perf.Start();
                     var tri = new List<int>(); float cell = size / grid * 2.5f;
                     for (int y = 0; y < grid; y++)
                         for (int x = 0; x < grid; x++)
@@ -213,7 +253,7 @@ namespace PotatoPainter
                             if ((verts[a] - verts[b]).magnitude > cell || (verts[a] - verts[c]).magnitude > cell || (verts[d] - verts[b]).magnitude > cell || (verts[d] - verts[c]).magnitude > cell) continue;
                             tri.AddRange(new[] { a, c, b, b, c, d, a, b, c, b, d, c });   // both faces
                         }
-                    if (tri.Count == 0) continue;
+                    if (tri.Count == 0) { Perf.Stop(tk + " trace: sheet build", sw); continue; }
 
                     // Trees: bent on the CPU exactly like the bark's triangles, when the bark has no flutter or push and every
                     // point landed on that one bark renderer (probe test 14). Otherwise drawn still.
@@ -289,7 +329,13 @@ namespace PotatoPainter
                         built.Registered.Add((lv.Group, lv.Index, r));
                         if (hr) built.Registered.Add((lv.Group, lv.Index, hr));
                     }
+                    Perf.Stop(tk + " trace: sheet build", sw);
                 }
+            }
+            if (Check && !preview && CheckN > 0)
+            {
+                Plugin.Log.LogInfo($"Trace reuse check: {CheckN} close-up points taken from the owner pass, {CheckDiff} different from casting them again");
+                CheckN = 0; CheckDiff = 0;
             }
             return built;
         }

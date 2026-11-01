@@ -16,13 +16,15 @@ namespace PotatoPainter
     internal static class GlowCap
     {
         // Measured hues (HSV hue of the colour at full saturation): red, ember, orange, yellow, green, cyan, blue, violet,
-        // magenta. 0.4.6: from 0.4.5's fine-step test at night (claude/potatopainter-glow-0.4.5.md, runs 5 and 6), rune light
-        // on, 5% steps of 0.4.4's caps, at full saturation and at half (HSV saturation 0.5, full value).
+        // magenta. 0.4.8 (the user, 2026-11-01: "Lowest reading"): the lowest night limit of the three glow tests that read
+        // it (0.4.4 in steps of 25% of the cap, 0.4.5 in 5% steps, 0.4.7's 95/100/105% checks; potatopainter-glow-0.4.4.md,
+        // -0.4.5.md, -0.4.7.md), rounded down, so each colour holds in every case seen. Rune light on. Full saturation and
+        // half (HSV saturation 0.5, full value; 0.4.4 read only ember, cyan and blue at half).
         private static readonly float[] Hue = { 0f, 0.0445f, 0.0833f, 0.1667f, 0.3333f, 0.5f, 0.6667f, 0.75f, 0.8333f };
-        private static readonly float[] WithBloom = { 0.80f, 0.78f, 0.81f, 0.81f, 0.89f, 0.84f, 0.82f, 0.82f, 0.71f };
-        private static readonly float[] WithoutBloom = { 0.93f, 0.87f, 0.93f, 0.96f, 1.09f, 1.02f, 0.96f, 0.97f, 0.80f };
-        private static readonly float[] HalfWithBloom = { 0.83f, 0.86f, 0.82f, 0.76f, 0.84f, 0.83f, 1.01f, 1.00f, 0.76f };
-        private static readonly float[] HalfWithoutBloom = { 0.97f, 1.04f, 0.99f, 0.89f, 1.02f, 1.04f, 1.23f, 1.30f, 0.86f };
+        private static readonly float[] WithBloom = { 0.76f, 0.74f, 0.77f, 0.80f, 0.88f, 0.83f, 0.77f, 0.77f, 0.71f };
+        private static readonly float[] WithoutBloom = { 0.90f, 0.84f, 0.91f, 0.92f, 1.08f, 0.97f, 0.93f, 0.94f, 0.78f };
+        private static readonly float[] HalfWithBloom = { 0.83f, 0.84f, 0.82f, 0.76f, 0.83f, 0.83f, 1.01f, 0.99f, 0.76f };
+        private static readonly float[] HalfWithoutBloom = { 0.95f, 1.00f, 0.94f, 0.87f, 0.99f, 1.01f, 1.22f, 1.30f, 0.84f };
         // White (no saturation) never washed out or filled a channel at any strength measured: at 1 its strokes read
         // 241 to 245 of 255 at night. Saturation between 0.5 and 1 is blended between the half and full readings; below 0.5
         // between white and the half readings (not measured).

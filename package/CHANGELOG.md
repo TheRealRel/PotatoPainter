@@ -1,3 +1,8 @@
+## 0.4.8 (test build, not released)
+- Less stutter when painting over walls made of many pieces.
+- Etched glow limits set a little lower, so every colour keeps its colour in every case measured.
+- Test build: the game log times each step of painting, and the glow and shadow tests stay in.
+
 ## 0.4.7 (test build, not released)
 - Test build: Right Ctrl + L switches shadows on rune lights on and off, to measure what they cost.
 
