@@ -30,11 +30,11 @@ namespace PotatoPainter
             if (windowStart < 0f) windowStart = Time.unscaledTime;
             float dt = Time.unscaledDeltaTime * 1000f; frames++; frameSum += dt; if (dt > frameMax) frameMax = dt;
             if (Time.unscaledTime - windowStart < 5f) return;
-            if (stats.Count > 0 || ShadowTest.Used)
+            if (stats.Count > 0)
             {
                 var parts = stats.OrderByDescending(kv => kv.Value.Total).Select(kv =>
                     $"{kv.Key} {kv.Value.N}x total {kv.Value.Total:0} ms max {kv.Value.Max:0.0} ms" + (kv.Value.A != 0 ? $" [{kv.Value.A}" + (kv.Value.B != 0 ? $"/{kv.Value.B}" : "") + "]" : ""));
-                Plugin.Log.LogInfo($"Perf 5 s: {frames} frames, frame avg {frameSum / Mathf.Max(1, frames):0.0} ms max {frameMax:0.0} ms; paints loaded {Paint.Loaded.Count}, ground sheets {Ground.All.Count}{(ShadowTest.Used ? "; " + ShadowTest.State() : "")}; " + string.Join("; ", parts));
+                Plugin.Log.LogInfo($"Perf 5 s: {frames} frames, frame avg {frameSum / Mathf.Max(1, frames):0.0} ms max {frameMax:0.0} ms; paints loaded {Paint.Loaded.Count}, ground sheets {Ground.All.Count}{(RuneLight.Shadows ? "; rune light shadows on" : "")}; " + string.Join("; ", parts));
             }
             stats.Clear(); frames = 0; frameSum = 0f; frameMax = 0f; windowStart = Time.unscaledTime;
         }

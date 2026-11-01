@@ -23,7 +23,7 @@ namespace PotatoPainter
     [NetworkCompatibility(CompatibilityLevel.EveryoneMustHaveMod, VersionStrictness.Minor)]
     public class Plugin : BaseUnityPlugin
     {
-        public const string Id = "potato.painter", Version = "0.4.9";
+        public const string Id = "potato.painter", Version = "0.4.10";
         // Saved in worlds and inventories: never rename.
         public const string ToolPrefab = "potato_runakefli";
         public const string TablePrefab = "_PotatoRunakefliPieceTable";
@@ -45,10 +45,22 @@ namespace PotatoPainter
         internal static readonly AccessTools.FieldRef<Player, PieceTable> BuildPieces = AccessTools.FieldRefAccess<Player, PieceTable>("m_buildPieces");
         private static readonly Func<Player, bool> TakeInput = AccessTools.MethodDelegate<Func<Player, bool>>(AccessTools.Method(typeof(Player), "TakeInput"));
 
+        // Each player's own (not synced). 0.4.10 (the user, 2026-11-01: "Player setting, off"): shadows cost about 1 ms a frame
+        // with 11 shadowed rune lights (potatopainter-glow-0.4.9-run.md).
+        internal static BepInEx.Configuration.ConfigEntry<bool> RuneLightShadows;
+
         private void Awake()
         {
             Log = Logger;
             Instance = this;
+            RuneLightShadows = Config.Bind("Rune lights", "Rune light shadows", false,
+                "Etched runes' lights cast shadows, so their light stops at walls instead of shining through. Costs some frame time (about 1 ms with 11 runes nearby); only the nearest get shadows, as many as the game's Point light shadows setting allows.");
+            RuneLight.Shadows = RuneLightShadows.Value;
+            RuneLightShadows.SettingChanged += (_, __) =>
+            {
+                RuneLight.Shadows = RuneLightShadows.Value;
+                foreach (var p in Paint.Loaded) if (p && p.HasData) p.RemakeLight();
+            };
             new Harmony(Id).PatchAll(typeof(Plugin).Assembly);
             PrefabManager.OnVanillaPrefabsAvailable += AddContent;
         }
@@ -146,7 +158,6 @@ namespace PotatoPainter
 
         private void Update()
         {
-            ShadowTest.Update();
             if (Doomed.Count > 0)
             {
                 foreach (var p in Doomed.ToList()) if (p) p.Delete();

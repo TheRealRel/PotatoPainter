@@ -41,9 +41,9 @@ namespace PotatoPainter
         // Glow: the kept value is a share of the colour's cap (0.4.4 on) or an absolute strength (before).
         internal bool GlowShare;
         // Drawn: dimmed in sunlight (SunDim, 0.4.9): surface colour and glow times Dim. The saved Col and Glow never change.
-        internal float Dim = 1f;
+        internal float Dim = 1f, SurfDim = 1f;
         internal Color Emission { get { if (!Etched) return Color.black; var e = GlowCap.Emission(Glow, GlowShare) * Dim; e.a = 1f; return e; } }
-        internal Color DrawCol { get { if (!Etched) return Col; var c = Col * Dim; c.a = 1f; return c; } }
+        internal Color DrawCol { get { if (!Etched) return Col; var c = Col * SurfDim; c.a = 1f; return c; } }
         // The glow's share of its cap (older absolute strengths: their strength over the cap).
         internal float Share => !Etched ? 0f : GlowShare ? Mathf.Clamp01(Glow.maxColorComponent) : Mathf.Clamp01(Glow.maxColorComponent / Mathf.Max(GlowCap.Cap(Glow, GlowCap.Bloom), 1e-3f));
         private float nextSun;
@@ -51,12 +51,10 @@ namespace PotatoPainter
         internal Transform CenterHost => built?.CenterHost;
 
         private ZNetView nview;
-        private bool ghost, listed, placedWithoutAim, repeat, placedNow;
+        private bool ghost, listed, placedWithoutAim, repeat;
         private Built built, preview;
         internal Built Drawn => built;
         private Light previewLight;   // the ghost's one light, moved with the preview (no LightLod: it would fade in on every retrace)
-        // Test-only (GlowTest): the ghost's preview stays off while the glow test reads the screen.
-        internal static bool HidePreview;
         private float nextCheck, previewTime;
         private Vector3 lastEye = Vector3.positiveInfinity, lastDir; private float lastTurn; private int lastSettings = -1;
         private static readonly HarmonyLib.AccessTools.FieldRef<Player, int> PlaceRotation = HarmonyLib.AccessTools.FieldRefAccess<Player, int>("m_placeRotation");
@@ -102,7 +100,6 @@ namespace PotatoPainter
             zdo.Set(KSize, aimSize); zdo.Set(KColor, new Vector3(aimCol.r, aimCol.g, aimCol.b)); zdo.Set(KLayer, aimLayer);
             if (Etched) { zdo.Set(KGlow, new Vector3(aimGlow.r, aimGlow.g, aimGlow.b)); zdo.Set(KGlowShare, 1); zdo.Set(KLight, aimLit ? 1 : 2); }
             zdo.Set(KVersion, 1);
-            placedNow = true;
             zdo.SetPosition(aim.Center);
             transform.position = aim.Center;
         }
@@ -135,8 +132,6 @@ namespace PotatoPainter
             HasData = true;
             if (ClearPile()) return;
             Rebuild();
-            // Test-only (0.4.3): every etched rune placed here starts the glow test on it.
-            if (placedNow && Etched) GlowTest.Run(this);
         }
 
         // Why the game must not place the selected rune where the ghost's preview is right now, or null when it may (read
@@ -186,7 +181,7 @@ namespace PotatoPainter
         {
             built?.Clear();
             var sw = Perf.Start();
-            if (Etched) { Dim = SunDim.Factor(Glow, Share, Frame, Size, GlowCap.Bloom); nextSun = Time.time + 2f + Random.value; }
+            if (Etched) { UpdateDim(); nextSun = Time.time + 2f + Random.value; }
             built = Trace.Build(Frame, Size, Lift, Look.Material(Rune, Etched), Etched ? Look.HaloFor(Rune) : null, DrawCol, Emission, false, (Etched ? "etch " : "paint ") + Rune.Art);
             Perf.Stop("paint trace size " + Size.ToString("0.0"), sw, built.Sheets);
             if (Etched && Lit && built.Sheets > 0)
@@ -198,7 +193,17 @@ namespace PotatoPainter
             Grass.Set(this, built.OnGround, Frame, Size);
         }
 
-        // Test-only (ShadowTest, 0.4.7): the rune light made again, with or without shadows. True when one was made.
+        // The sun dimming now (SunDim); true when it moved enough to redraw.
+        private bool UpdateDim()
+        {
+            float day = SunDim.Day(), sun = SunDim.Sun(Frame, Size);
+            float f = SunDim.Factor(Glow, Share, day, sun, GlowCap.Bloom), s = SunDim.SurfaceFactor(f, sun);
+            if (Mathf.Abs(f - Dim) <= 0.01f && Mathf.Abs(s - SurfDim) <= 0.01f) return false;
+            Dim = f; SurfDim = s;
+            return true;
+        }
+
+        // The rune light made again, with or without shadows (the Rune light shadows setting changed). True when one was made.
         internal bool RemakeLight()
         {
             if (built == null || !Etched || !Lit || built.Sheets == 0) return false;
@@ -224,11 +229,10 @@ namespace PotatoPainter
             if (ghost) { Preview(); return; }
             if (!HasData) return;
             // The sun moves and things come and go in front of it: every two seconds or so.
-            if (Etched && built != null && Time.time >= nextSun && !GlowTest.Running)
+            if (Etched && built != null && Time.time >= nextSun)
             {
                 nextSun = Time.time + 2f;
-                float f = SunDim.Factor(Glow, Share, Frame, Size, GlowCap.Bloom);
-                if (Mathf.Abs(f - Dim) > 0.01f) { Dim = f; Retint(); }
+                if (UpdateDim()) Retint();
             }
             if (Time.time < nextCheck) return;
             nextCheck = Time.time + 2f;
@@ -243,13 +247,6 @@ namespace PotatoPainter
         // line through it can miss everything (test 0.1.3: "the aim ray hit nothing" on the user's stone build).
         private void Preview()
         {
-            if (HidePreview)
-            {
-                if (preview != null) { preview.Clear(); preview = null; }
-                if (previewLight) previewLight.enabled = false;
-                lastSettings = -1;
-                return;
-            }
             var cam = Utils.GetMainCamera();
             if (!cam) return;
             var eye = cam.transform.position; var dir = cam.transform.forward;
@@ -284,8 +281,8 @@ namespace PotatoPainter
             if (Etched)
             {
                 // Dimmed in sunlight like the placed rune will be (SunDim).
-                float df = SunDim.Factor(kept, Settings.Glow, aim, size, GlowCap.Bloom);
-                col *= df; col.a = 1f; glow *= df; glow.a = 1f;
+                float sunAt = SunDim.Sun(aim, size), df = SunDim.Factor(kept, Settings.Glow, SunDim.Day(), sunAt, GlowCap.Bloom);
+                col *= SunDim.SurfaceFactor(df, sunAt); col.a = 1f; glow *= df; glow.a = 1f;
             }
             var sw = Perf.Start();
             preview = Trace.Build(aim, size, 0.004f + 0.002f * aimLayer, Look.Material(Rune, Etched), Etched ? Look.HaloFor(Rune) : null, col, glow, true, "preview");

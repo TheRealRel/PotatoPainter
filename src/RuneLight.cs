@@ -14,12 +14,11 @@ namespace PotatoPainter
         // torches 80 m), so a rune light gives way to a torch at the same distance.
         internal const float RangePerSize = 7f, IntensityPerGlow = 1.2f, Off = 0.15f, LodDistance = 30f;
 
-        // Test-only (0.4.7, the user: "Let's test it, if it affects performance (maybe a toggle, if possible). Otherwise we'll
-        // not use it."): rune lights with shadows, switched with Right Ctrl + L (ShadowTest). The game's LightLod then gives
-        // shadows only to lights ranked under the Point light shadows graphics setting (m_shadowLimit) and within its
-        // m_shadowDistance, fading them in and out over about a second (assembly_valheim LightLod.Awake and UpdateLoop, read
-        // 2026-11-01; Awake drops the shadow LOD when the light has no shadows, so lights are remade on a switch). 20 m is
-        // the torches' m_shadowDistance (research-2.md).
+        // Rune lights with shadows: the player's setting "Rune light shadows" (off by default; tested in 0.4.7 to 0.4.9 with
+        // a test key). The game's LightLod then gives shadows only to lights ranked under the Point light shadows graphics
+        // setting (m_shadowLimit) and within its m_shadowDistance, fading them in and out over about a second
+        // (assembly_valheim LightLod.Awake and UpdateLoop, read 2026-11-01; Awake drops the shadow LOD when the light has no
+        // shadows, so lights are remade when the setting changes). 20 m is the torches' m_shadowDistance (research-2.md).
         internal static bool Shadows;
         internal const float ShadowDistance = 20f;
 

@@ -29,6 +29,9 @@ namespace PotatoPainter
         // 241 to 245 of 255 at night. Saturation between 0.5 and 1 is blended between the half and full readings; below 0.5
         // between white and the half readings (not measured).
         private const float White = 1f;
+        // 0.4.10 (the user, 2026-11-01: "15% margin, stop testing"): the limit moved 10 to 20% between spots, walls and runs
+        // in 0.4.4 to 0.4.9 (potatopainter-glow-0.4.9-run.md), so every cap is 15% under the measured limit.
+        internal const float Margin = 0.85f;
 
         private static bool bloom; private static int frame = -1;
 
@@ -56,7 +59,7 @@ namespace PotatoPainter
         {
             Color.RGBToHSV(glow, out float h, out float sat, out _);
             float full = AtHue(withBloom ? WithBloom : WithoutBloom, h), half = AtHue(withBloom ? HalfWithBloom : HalfWithoutBloom, h);
-            return sat >= 0.5f ? Mathf.Lerp(half, full, (sat - 0.5f) * 2f) : Mathf.Lerp(White, half, sat * 2f);
+            return Margin * (sat >= 0.5f ? Mathf.Lerp(half, full, (sat - 0.5f) * 2f) : Mathf.Lerp(White, half, sat * 2f));
         }
 
         // A table's value at a hue, linear between the measured hues (magenta back round to red).

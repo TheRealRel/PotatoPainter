@@ -1,3 +1,8 @@
+## 0.4.10 (test build, not released)
+- Etched glow a little softer, so every colour keeps its colour in more places, day and night.
+- New setting: Rune light shadows (off by default). When on, the light of nearby etched runes stops at walls instead of shining through; costs some frame time.
+- The glow test is gone.
+
 ## 0.4.9 (test build, not released)
 - Etched runes dim a little in sunlight, both their colour and their glow, so they keep their colour instead of washing out. They are as before at night and in shade.
 - Test build: by day the glow test now checks the sunlight dimming (about half a minute, hold still).
