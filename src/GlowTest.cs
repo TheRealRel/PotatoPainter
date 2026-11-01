@@ -5,8 +5,11 @@
 // test" and "Lower the cap in sunlight"): every hue at full and half saturation, in 5% steps of the cap around where it
 // goes flat (from 70% at night, 50% by day; down while flat, up until two flat readings in a row, at most 160%), each
 // colour first with no glow (the sunlit surface alone), plus the light reaching the rune (sun direction, sunlit rays,
-// sun and ambient), the inputs a daytime cap would use. Starts on every etched rune placed by this player; the camera
-// and the rune stay put for about a minute. Same screen reading as probe tests 19 to 22. Take out before release.
+// sun and ambient), the inputs a daytime cap would use. 0.4.6 (the user: "Surface and glow dim in sun"; caps now from
+// 0.4.5's night readings): at night each colour at 95/100/105% of the new cap; by day, for each colour, the most the
+// surface colour and the glow can both be multiplied by (f) and still hold, with the glow at its cap and with none.
+// Starts on every etched rune placed by this player; the camera and the rune stay put for about a minute. Same screen
+// reading as probe tests 19 to 22. Take out before release.
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -24,8 +27,6 @@ namespace PotatoPainter
             ("yellow", 0.1667f, new Color(1f, 1f, 0f)), ("green", 0.3333f, new Color(0f, 1f, 0f)), ("cyan", 0.5f, new Color(0f, 1f, 1f)),
             ("blue", 0.6667f, new Color(0f, 0f, 1f)), ("violet", 0.75f, new Color(0.5f, 0f, 1f)), ("magenta", 0.8333f, new Color(1f, 0f, 1f)),
         };
-        // Steps of 5% of the cap: the first reading (70% at night, 50% by day), never below 10% or above 160%.
-        private const int StepNight = 14, StepDay = 10, StepMin = 2, StepMax = 32;
         private static bool running;
 
         internal static void Run(Paint p)
@@ -50,7 +51,7 @@ namespace PotatoPainter
                 yield return new WaitForSeconds(1.5f);
                 if (!Alive(p)) { Plugin.Log.LogInfo("Glow test stopped: the rune is gone"); yield break; }
                 var cam = Utils.GetMainCamera();
-                Plugin.Log.LogInfo($"Glow test start: {p.Rune.Art}, size {p.Size:0.00} m, {(cam ? Vector3.Distance(cam.transform.position, p.Frame.Center).ToString("0.0") : "?")} m from the camera, kept glow {p.Glow} ({(p.GlowShare ? "share of the cap" : "strength")} {p.Glow.maxColorComponent:0.00}), drawn {p.Emission}, surface {p.Col}, light {(p.Lit ? "on" : "off")}; {colours.Count} colours in 5% steps; game point light limit {LightLod.m_lightLimit}; {LightNow()}; {CameraNow()}");
+                Plugin.Log.LogInfo($"Glow test start: {p.Rune.Art}, size {p.Size:0.00} m, {(cam ? Vector3.Distance(cam.transform.position, p.Frame.Center).ToString("0.0") : "?")} m from the camera, kept glow {p.Glow} ({(p.GlowShare ? "share of the cap" : "strength")} {p.Glow.maxColorComponent:0.00}), drawn {p.Emission}, surface {p.Col}, light {(p.Lit ? "on" : "off")}; {colours.Count} colours; game point light limit {LightLod.m_lightLimit}; {LightNow()}; {CameraNow()}");
                 Plugin.Log.LogInfo($"Glow test {LightAt(p)}");
                 var read = new Reading();
                 yield return Shot(p, "as placed", null, read);
@@ -60,50 +61,49 @@ namespace PotatoPainter
                 var light = testLight.AddComponent<Light>();
                 light.enabled = false;
                 bool bloom = GlowCap.Bloom, day = EnvMan.IsDaylight();
-                int first = day ? StepDay : StepNight, shots = 1;
-                Plugin.Log.LogInfo($"Glow test, caps for bloom {(bloom ? "on" : "off")}, rune light on (range {RuneLight.RangePerSize} x size, intensity {RuneLight.IntensityPerGlow} x strength), first step {first * 5}% ({(day ? "day" : "night")}); {LightNow()}");
+                int shots = 1;
+                Plugin.Log.LogInfo($"Glow test, caps for bloom {(bloom ? "on" : "off")}, rune light on (range {RuneLight.RangePerSize} x size, intensity {RuneLight.IntensityPerGlow} x strength), {(day ? "day: dimming search" : "night: caps check")}; {LightNow()}");
                 foreach (var (name, hue, half) in colours)
                 {
                     float cap = GlowCap.Cap(hue, bloom), sat = half ? 0.25f : 0.5f;
-                    // One reading of this colour at a share of the cap (0 = no glow, rune light off: the lit surface alone).
-                    IEnumerator At(int step)
+                    // One reading: glow at a share of the cap, then surface colour and glow (and so the rune light) both times
+                    // f, the way 0.4.7 would dim a sunlit rune.
+                    IEnumerator At(string what, float share, float f)
                     {
-                        float k = step * 0.05f;
-                        var glow = hue * (k * cap); glow.a = 1f;
+                        var glow = hue * (share * cap * f); glow.a = 1f;
                         if (p.Drawn?.Light) p.Drawn.Light.SetActive(false);
-                        foreach (var r in p.Drawn.Strokes) if (r) Block(r, hue * Settings.EtchedSurface, glow);
+                        foreach (var r in p.Drawn.Strokes) if (r) Block(r, hue * (Settings.EtchedSurface * f), glow);
                         foreach (var h in p.Drawn.Halos) if (h) Look.HaloColour(h, glow);
-                        light.enabled = step > 0;
+                        light.enabled = glow.maxColorComponent > 0f;
                         RuneLight.Setup(light, p.Size, glow);
                         shots++;
-                        yield return Shot(p, $"cap {name} {step * 5}% of {cap:0.00} = x{k * cap:0.00} (emission {glow})", step > 0 ? light : null, read);
+                        yield return Shot(p, $"{what} {name} {share * 100f:0}% of {cap:0.00} f {f:0.000} = x{share * cap * f:0.00} (emission {glow})", glow.maxColorComponent > 0f ? light : null, read);
                     }
                     if (!Alive(p)) { Plugin.Log.LogInfo("Glow test stopped: the rune is gone"); yield break; }
-                    yield return At(0);
-                    int s0 = first;
-                    yield return At(s0);
-                    if (read.Strokes == null) continue;
-                    if (read.Strokes.Flat(sat))
+                    if (!day)
                     {
-                        // Flat already: step down until it holds.
-                        for (int s = s0 - 1; s >= StepMin; s--)
-                        {
-                            if (!Alive(p)) { Plugin.Log.LogInfo("Glow test stopped: the rune is gone"); yield break; }
-                            yield return At(s);
-                            if (read.Strokes == null || !read.Strokes.Flat(sat)) break;
-                        }
+                        // Night: the new caps at 95, 100 and 105%.
+                        foreach (float k in new[] { 0.95f, 1f, 1.05f }) yield return At("check", k, 1f);
+                        continue;
                     }
-                    else
+                    // Day: the most f that still holds, with the glow at its cap and with no glow (the surface alone). Halving
+                    // the range six times: within 1/64.
+                    foreach (float share in new[] { 1f, 0f })
                     {
-                        // Holds: step up until two flat readings in a row.
-                        int flatRun = 0;
-                        for (int s = s0 + 1; s <= StepMax && flatRun < 2; s++)
-                        {
-                            if (!Alive(p)) { Plugin.Log.LogInfo("Glow test stopped: the rune is gone"); yield break; }
-                            yield return At(s);
-                            if (read.Strokes == null) break;
-                            flatRun = read.Strokes.Flat(sat) ? flatRun + 1 : 0;
-                        }
+                        yield return At("dim", share, 1f);
+                        if (read.Strokes == null) continue;
+                        float lo = 0f, hi = 1f;
+                        if (!read.Strokes.Flat(sat)) lo = 1f;
+                        else
+                            for (int i = 0; i < 6; i++)
+                            {
+                                if (!Alive(p)) { Plugin.Log.LogInfo("Glow test stopped: the rune is gone"); yield break; }
+                                float mid = (lo + hi) * 0.5f;
+                                yield return At("dim", share, mid);
+                                if (read.Strokes == null) break;
+                                if (read.Strokes.Flat(sat)) hi = mid; else lo = mid;
+                            }
+                        Plugin.Log.LogInfo($"Glow test holds {name} {share * 100f:0}% of {cap:0.00}: up to f {lo:0.000}");
                     }
                 }
                 Plugin.Log.LogInfo($"Glow test {LightAt(p)}");

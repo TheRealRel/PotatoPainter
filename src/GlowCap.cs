@@ -3,7 +3,8 @@
 // on, the strength at which each colour stops holding, either washing out to white (saturation below 0.5) or filling up
 // to a flat block (more than half the stroke pixels at 250+ in a channel). Bloom lowers the limit, so the cap follows the
 // bloom setting of whoever is looking (the game's PostProcessingBehaviour profile). By day in strong sun the limit is
-// lower still (0.41 to 0.92 measured); the user accepted a little washing out there.
+// lower still (0.41 to 0.92 measured); 0.4.5 showed the sunlit surface colour alone washes out in direct sun, and the
+// user picked "surface and glow dim in sun" (2026-10-31); 0.4.6 measures how far (test only), the caps here are night.
 //
 // Paints keep their glow as a share of the cap (the hue at full brightness times the share, ZDO PotatoPainter.Glow with
 // PotatoPainter.GlowShare = 1), so every player sees each colour at its own best for their bloom setting. Paints etched
@@ -14,14 +15,17 @@ namespace PotatoPainter
 {
     internal static class GlowCap
     {
-        // Measured hues (HSV hue of the colour at full saturation): red, ember, orange, yellow (0.4.3's "yours", hue 0.162,
-        // read 0.81 / 0.94, within 0.02 of yellow), green, cyan, blue, violet, magenta. Night, rune light on.
+        // Measured hues (HSV hue of the colour at full saturation): red, ember, orange, yellow, green, cyan, blue, violet,
+        // magenta. 0.4.6: from 0.4.5's fine-step test at night (claude/potatopainter-glow-0.4.5.md, runs 5 and 6), rune light
+        // on, 5% steps of 0.4.4's caps, at full saturation and at half (HSV saturation 0.5, full value).
         private static readonly float[] Hue = { 0f, 0.0445f, 0.0833f, 0.1667f, 0.3333f, 0.5f, 0.6667f, 0.75f, 0.8333f };
-        private static readonly float[] WithBloom = { 0.81f, 0.76f, 0.83f, 0.79f, 0.88f, 0.85f, 0.84f, 0.84f, 0.66f };
-        private static readonly float[] WithoutBloom = { 0.90f, 0.89f, 0.91f, 0.92f, 1.04f, 0.98f, 0.91f, 0.92f, 0.86f };
+        private static readonly float[] WithBloom = { 0.80f, 0.78f, 0.81f, 0.81f, 0.89f, 0.84f, 0.82f, 0.82f, 0.71f };
+        private static readonly float[] WithoutBloom = { 0.93f, 0.87f, 0.93f, 0.96f, 1.09f, 1.02f, 0.96f, 0.97f, 0.80f };
+        private static readonly float[] HalfWithBloom = { 0.83f, 0.86f, 0.82f, 0.76f, 0.84f, 0.83f, 1.01f, 1.00f, 0.76f };
+        private static readonly float[] HalfWithoutBloom = { 0.97f, 1.04f, 0.99f, 0.89f, 1.02f, 1.04f, 1.23f, 1.30f, 0.86f };
         // White (no saturation) never washed out or filled a channel at any strength measured: at 1 its strokes read
-        // 241 to 245 of 255 at night. Colours between white and full saturation are blended by saturation, a step the test
-        // didn't measure; 0.4.4's glow test reads half-saturated colours to check it.
+        // 241 to 245 of 255 at night. Saturation between 0.5 and 1 is blended between the half and full readings; below 0.5
+        // between white and the half readings (not measured).
         private const float White = 1f;
 
         private static bool bloom; private static int frame = -1;
@@ -48,18 +52,19 @@ namespace PotatoPainter
         // The cap for a glow colour (any brightness; only its hue and saturation count).
         internal static float Cap(Color glow, bool withBloom)
         {
-            Color.RGBToHSV(glow, out float h, out float s, out _);
-            var caps = withBloom ? WithBloom : WithoutBloom;
-            float full;
+            Color.RGBToHSV(glow, out float h, out float sat, out _);
+            float full = AtHue(withBloom ? WithBloom : WithoutBloom, h), half = AtHue(withBloom ? HalfWithBloom : HalfWithoutBloom, h);
+            return sat >= 0.5f ? Mathf.Lerp(half, full, (sat - 0.5f) * 2f) : Mathf.Lerp(White, half, sat * 2f);
+        }
+
+        // A table's value at a hue, linear between the measured hues (magenta back round to red).
+        private static float AtHue(float[] caps, float h)
+        {
             int n = Hue.Length;
-            if (h >= Hue[n - 1]) full = Mathf.Lerp(caps[n - 1], caps[0], (h - Hue[n - 1]) / (1f - Hue[n - 1]));
-            else
-            {
-                int i = 0;
-                while (i < n - 2 && h >= Hue[i + 1]) i++;
-                full = Mathf.Lerp(caps[i], caps[i + 1], (h - Hue[i]) / (Hue[i + 1] - Hue[i]));
-            }
-            return Mathf.Lerp(White, full, s);
+            if (h >= Hue[n - 1]) return Mathf.Lerp(caps[n - 1], caps[0], (h - Hue[n - 1]) / (1f - Hue[n - 1]));
+            int i = 0;
+            while (i < n - 2 && h >= Hue[i + 1]) i++;
+            return Mathf.Lerp(caps[i], caps[i + 1], (h - Hue[i]) / (Hue[i + 1] - Hue[i]));
         }
 
         // What a paint's kept glow becomes on screen: a share of the cap (0.4.4 on), or an older absolute strength held

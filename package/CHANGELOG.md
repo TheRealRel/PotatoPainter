@@ -1,3 +1,7 @@
+## 0.4.6 (test build, not released)
+- Etched glow limits remeasured for every colour, and lighter (less saturated) colours now have their own.
+- Test build: placing an etched rune runs a glow test (about a minute, hold still): at night it checks the new limits, by day it measures how much a sunlit rune needs to dim to keep its colour.
+
 ## 0.4.5 (test build, not released)
 - Test build: placing an etched rune now runs a finer glow test, every colour in small steps, by day and at night (about a minute, hold still).
 
