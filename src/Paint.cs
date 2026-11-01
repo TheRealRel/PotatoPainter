@@ -25,7 +25,8 @@ namespace PotatoPainter
             KGlowShare = "PotatoPainter.GlowShare".GetStableHashCode();
 
         // The placement ghost's latest aim, read by OnPlaced on the same client right after the game places the piece.
-        private static Frame aim; private static bool aimValid; private static float aimTime; private static int aimLayer;
+        private static Frame aim; private static bool aimValid, aimFar; private static float aimTime; private static int aimLayer;
+        private static string aimWhy;   // test data (0.4.11): why the last aim found nothing, for the refused-click log
         private static readonly HashSet<string> logged = new HashSet<string>();
         private static float previewCost;   // seconds the last preview trace took
         private static Rune aimRune; private static bool aimEtched; private static float aimSize = DefaultSize; private static Color aimCol, aimGlow; private static bool aimLit;
@@ -138,9 +139,20 @@ namespace PotatoPainter
         // by Plugin's placement check, so a click that can't paint takes nothing).
         internal static string Refusal()
         {
+            // Out of reach gets its own message (0.4.11): it used to say there was nothing to paint.
+            if (!aimValid && aimFar) return aimEtched ? "$msg_potato_etch_toofar" : "$msg_potato_paint_toofar";
             if (!aimValid || Time.time - aimTime > 1f) return aimEtched ? "$msg_potato_etch_nosurface" : "$msg_potato_paint_nosurface";
             if (aimRune != null && Loaded.Any(p => p && p.HasData && Repeats(p, aimRune, aimEtched, aim, aimSize, aimCol, aimGlow, aimLit, true))) return aimEtched ? "$msg_potato_etch_repeat" : "$msg_potato_paint_repeat";
             return null;
+        }
+
+        // Test data (0.4.11): why Refusal said no, for the refused-click log. Taken out before release.
+        internal static string RefusalDetail()
+        {
+            float age = Time.time - aimTime;
+            if (!aimValid) return $"aim {age:0.00} s old; {aimWhy ?? "no aim yet"}";
+            if (age > 1f) return $"aim too old: {age:0.00} s (the preview last traced then; last trace took {previewCost * 1000f:0} ms)";
+            return $"aim {age:0.00} s old; same rune already there or symbol locked";
         }
 
         // The same rune of the same kind, colour, glow, light and size on the same spot. A new colour, size or light over an
@@ -266,8 +278,12 @@ namespace PotatoPainter
             // Grass is left out under the preview once the aim rests, and given back only when the aim leaves that spot
             // (test 0.1.7: the camera's own small movements gave it back and took it again twice a second, remaking four
             // grass patches each time).
-            aimValid = Trace.Aim(eye, dir, 50f, size, cam.transform.right, turn, out aim)
-                && (!player || Vector3.Distance(player.GetEyePoint(), aim.Center) <= player.m_maxPlaceDistance);
+            bool aimed = Trace.Aim(eye, dir, 50f, size, cam.transform.right, turn, out aim);
+            float far = aimed && player ? Vector3.Distance(player.GetEyePoint(), aim.Center) : 0f;
+            aimFar = aimed && player && far > player.m_maxPlaceDistance;
+            aimValid = aimed && !aimFar;
+            aimWhy = aimed ? (aimFar ? $"farther than you can build: {far:0.00} m from your eyes, the most is {player.m_maxPlaceDistance:0.00} m" : null)
+                : $"{Trace.Why}; {Trace.WhyDetail}";
             aimTime = Time.time; aimRune = Rune; aimEtched = Etched; aimSize = size; aimCol = col; aimGlow = kept; aimLit = Etched && Settings.Light;
             // Test data (0.2.2: "some trees aren't registering"): each object and reason once. Taken out before release.
             if (!aimValid && Trace.WhyHit)

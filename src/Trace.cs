@@ -79,16 +79,24 @@ namespace PotatoPainter
         // Test data (0.2.2: "some trees aren't registering"): why the aim found nothing, and what was hit. Taken out before
         // release.
         internal static string Why; internal static Collider WhyHit;
+        // Test data (0.4.11): for an aim that hit a collider but none of the drawn surfaces, where the ray was and how near it
+        // came to a drawn triangle. Taken out before release.
+        internal static string WhyDetail;
 
         internal static bool Aim(Vector3 eye, Vector3 dir, float max, float size, Vector3 cameraRight, float turn, out Frame frame)
         {
-            frame = default; Why = null; WhyHit = null;
+            frame = default; Why = null; WhyHit = null; WhyDetail = null;
             if (!Physics.Raycast(eye, dir, out var hit, max, Mask, QueryTriggerInteraction.Ignore)) { Why = "the aim ray hit nothing"; return false; }
             WhyHit = hit.collider;
             var hosts = Hosts(hit.point, size, hit.collider);
             if (hosts.Count == 0) { Why = "nothing readable on what the aim ray hit"; return false; }
             var reference = hosts.SelectMany(h => h.Reference).ToList();
-            if (!Cast(reference, eye, dir, hit.distance + 1.5f, default, out var center, out var n, out var aimed, out var aimedTri, out _)) { Why = $"none of the drawn surfaces of {string.Join(", ", hosts.Select(h => h.Root.name))} lies on the aim ray ({reference.Count} surfaces read)"; return false; }
+            if (!Cast(reference, eye, dir, hit.distance + 1.5f, default, out var center, out var n, out var aimed, out var aimedTri, out _))
+            {
+                Why = $"none of the drawn surfaces of {string.Join(", ", hosts.Select(h => h.Root.name))} lies on the aim ray ({reference.Count} surfaces read)";
+                WhyDetail = NearMiss(reference, eye, dir, hit, hit.distance + 1.5f);
+                return false;
+            }
             var mat = aimed.TriMat != null ? aimed.TriMat[aimedTri] : null;
             frame.Center = center; frame.Normal = n;
             frame.Tree = mat && mat.shader && mat.shader.name == "Custom/Vegetation";
@@ -103,6 +111,35 @@ namespace PotatoPainter
             // rotation in degrees; seen from the front, clockwise as a piece turns seen from above).
             if (turn != 0f) frame.Up = Quaternion.AngleAxis(turn, n) * frame.Up;
             return true;
+        }
+
+        // Test data (0.4.11): of the drawn triangles whose plane the ray crosses within reach, the one it misses by the least
+        // (how far outside it the crossing lies, in its barycentric terms and in metres), and where the collider was hit.
+        private static string NearMiss(List<Surface> surfaces, Vector3 eye, Vector3 dir, RaycastHit hit, float max)
+        {
+            int crossed = 0, tris = 0; float best = float.MaxValue, bestT = 0f, bestM = 0f, bestEdge = 0f; string bestName = "";
+            foreach (var s in surfaces)
+                for (int i = 0; i + 2 < s.T.Length; i += 3)
+                {
+                    tris++;
+                    Vector3 a = s.V[s.T[i]], b = s.V[s.T[i + 1]], c = s.V[s.T[i + 2]];
+                    Vector3 nrm = Vector3.Cross(b - a, c - a);
+                    float den = Vector3.Dot(nrm, dir);
+                    if (Mathf.Abs(den) < 1e-12f) continue;
+                    float t = Vector3.Dot(nrm, a - eye) / den;
+                    if (t <= 0f || t >= max) continue;
+                    crossed++;
+                    var p = eye + dir * t;
+                    var bc = Barycentric(p, a, b, c);
+                    float outside = Mathf.Max(-bc.x, Mathf.Max(-bc.y, -bc.z));
+                    if (outside < best)
+                    {
+                        best = outside; bestT = t; bestEdge = Mathf.Max((b - a).magnitude, Mathf.Max((c - b).magnitude, (a - c).magnitude));
+                        bestM = Mathf.Min((Closest(p, a, b, c) - p).magnitude, 99f);
+                        bestName = s.R ? s.R.name : "?";
+                    }
+                }
+            return $"collider hit {hit.collider.name} at {hit.point} ({hit.distance:0.000} m along the ray, its normal {hit.normal}); eye {eye}, ray {dir}; {tris} drawn triangles, {crossed} with their plane crossed within {max:0.00} m; nearest miss {(best == float.MaxValue ? "none" : $"{best:0.000000} outside (barycentric), {bestM * 1000f:0.000} mm off, at {bestT:0.000} m, on {bestName}, triangle {bestEdge:0.000} m across")}";
         }
 
         // ------------------------------------------------------------------ building

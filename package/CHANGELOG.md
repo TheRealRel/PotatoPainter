@@ -1,3 +1,7 @@
+## 0.4.11 (test build, not released)
+- Aiming out of reach now says "Too far away to paint" (or etch) instead of "Nothing to paint on there".
+- Test build: the game log notes every refused click and why.
+
 ## 0.4.10 (test build, not released)
 - Etched glow a little softer, so every colour keeps its colour in more places, day and night.
 - New setting: Rune light shadows (off by default). When on, the light of nearby etched runes stops at walls instead of shining through; costs some frame time.
