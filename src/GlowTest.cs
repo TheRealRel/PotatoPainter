@@ -28,6 +28,7 @@ namespace PotatoPainter
             ("blue", 0.6667f, new Color(0f, 0f, 1f)), ("violet", 0.75f, new Color(0.5f, 0f, 1f)), ("magenta", 0.8333f, new Color(1f, 0f, 1f)),
         };
         private static bool running;
+        internal static bool Running => running;
 
         internal static void Run(Paint p)
         {
@@ -62,7 +63,7 @@ namespace PotatoPainter
                 light.enabled = false;
                 bool bloom = GlowCap.Bloom, day = EnvMan.IsDaylight();
                 int shots = 1;
-                Plugin.Log.LogInfo($"Glow test, caps for bloom {(bloom ? "on" : "off")}, rune light on (range {RuneLight.RangePerSize} x size, intensity {RuneLight.IntensityPerGlow} x strength), {(day ? "day: dimming search" : "night: caps check")}; {LightNow()}");
+                Plugin.Log.LogInfo($"Glow test, caps for bloom {(bloom ? "on" : "off")}, rune light on (range {RuneLight.RangePerSize} x size, intensity {RuneLight.IntensityPerGlow} x strength), {(day ? "day: sun dimming check" : "night: caps check")}; {LightNow()}");
                 foreach (var (name, hue, half) in colours)
                 {
                     float cap = GlowCap.Cap(hue, bloom), sat = half ? 0.25f : 0.5f;
@@ -86,25 +87,16 @@ namespace PotatoPainter
                         foreach (float k in new[] { 0.95f, 1f, 1.05f }) yield return At("check", k, 1f);
                         continue;
                     }
-                    // Day: the most f that still holds, with the glow at its cap and with no glow (the surface alone). Halving
-                    // the range six times: within 1/64.
-                    foreach (float share in new[] { 1f, 0f })
-                    {
-                        yield return At("dim", share, 1f);
-                        if (read.Strokes == null) continue;
-                        float lo = 0f, hi = 1f;
-                        if (!read.Strokes.Flat(sat)) lo = 1f;
-                        else
-                            for (int i = 0; i < 6; i++)
-                            {
-                                if (!Alive(p)) { Plugin.Log.LogInfo("Glow test stopped: the rune is gone"); yield break; }
-                                float mid = (lo + hi) * 0.5f;
-                                yield return At("dim", share, mid);
-                                if (read.Strokes == null) break;
-                                if (read.Strokes.Flat(sat)) hi = mid; else lo = mid;
-                            }
-                        Plugin.Log.LogInfo($"Glow test holds {name} {share * 100f:0}% of {cap:0.00}: up to f {lo:0.000}");
-                    }
+                    // Day (0.4.9): the sun dimming checked. The glow at its cap with the multiplier SunDim gives here now, then
+                    // 10% brighter than that (should go flat when the multiplier is right, unless it was already 1).
+                    float sunNow = SunDim.Sun(p.Frame, p.Size), dayNow = SunDim.Day();
+                    float fNow = SunDim.Factor(hue, 1f, dayNow, sunNow, bloom);
+                    yield return At($"sun check (day {dayNow:0.00}, sun {sunNow:0.00})", 1f, fNow);
+                    bool held = read.Strokes != null && !read.Strokes.Flat(sat);
+                    float fUp = Mathf.Min(1.5f, fNow * 1.1f);
+                    yield return At($"sun check (day {dayNow:0.00}, sun {sunNow:0.00})", 1f, fUp);
+                    bool heldUp = read.Strokes != null && !read.Strokes.Flat(sat);
+                    Plugin.Log.LogInfo($"Glow test sun {name}: f {fNow:0.000} {(held ? "holds" : "FLAT")}, x1.1 {(heldUp ? "holds" : "flat")}");
                 }
                 Plugin.Log.LogInfo($"Glow test {LightAt(p)}");
                 Plugin.Log.LogInfo($"Glow test screens: {shots}");
@@ -116,7 +108,7 @@ namespace PotatoPainter
                 if (testLight) UnityEngine.Object.Destroy(testLight);
                 if (Alive(p))
                 {
-                    foreach (var r in p.Drawn.Strokes) if (r) Look.Colour(r, p.Col, p.Emission);
+                    foreach (var r in p.Drawn.Strokes) if (r) Look.Colour(r, p.DrawCol, p.Emission);
                     foreach (var h in p.Drawn.Halos) if (h) Look.HaloColour(h, p.Emission);
                     if (p.Drawn.Light) p.Drawn.Light.SetActive(true);
                 }

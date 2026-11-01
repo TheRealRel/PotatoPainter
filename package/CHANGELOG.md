@@ -1,3 +1,7 @@
+## 0.4.9 (test build, not released)
+- Etched runes dim a little in sunlight, both their colour and their glow, so they keep their colour instead of washing out. They are as before at night and in shade.
+- Test build: by day the glow test now checks the sunlight dimming (about half a minute, hold still).
+
 ## 0.4.8 (test build, not released)
 - Less stutter when painting over walls made of many pieces.
 - Etched glow limits set a little lower, so every colour keeps its colour in every case measured.

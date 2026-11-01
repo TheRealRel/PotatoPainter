@@ -53,9 +53,6 @@ namespace PotatoPainter
     internal static class Trace
     {
         internal const string Prefix = "PotatoPainter ";
-        // Test-only (0.4.8): placed traces also cast the close-up points the owner pass already found, and count differences.
-        internal const bool Check = true;
-        private static int CheckN, CheckDiff;
         internal static readonly int Mask = LayerMask.GetMask("Default", "static_solid", "Default_small", "piece", "terrain", "vehicle", "piece_nonsolid");
 
         internal sealed class Surface { internal Vector3[] V; internal int[] T; internal Renderer R; internal Material[] TriMat; internal Vector2[] UV2; }
@@ -216,16 +213,8 @@ namespace PotatoPainter
                         Vector3 at, nn; Surface hs; int ht; Vector2 u2; bool hit;
                         if (closeUp && reuse[owner[i]])
                         {
+                            // Same hit as casting again (0.4.8's check: 0 different over 40+ placed traces, 2026-11-01).
                             hit = true; at = oAt[i]; nn = oN[i]; hs = oS[i]; ht = oT[i]; u2 = oU[i];
-                            if (Check && !preview)
-                            {
-                                // Test-only (0.4.8): the cast it replaces, compared.
-                                var on0 = owner[i] == k ? surfaces : Other(owner[i], lv);
-                                bool h2 = Cast(Ix(on0), on0, starts[i], -n, reach * 2f, plane, out var a2, out var n2, out var s2, out var t2, out var v2);
-                                CheckN++;
-                                if (!h2 || a2 != at || n2 != nn || t2 != ht || v2 != u2 || s2 == null || s2.R != hs.R || s2.V != hs.V
-                                    || s2.T[3 * t2] != hs.T[3 * ht] || s2.T[3 * t2 + 1] != hs.T[3 * ht + 1] || s2.T[3 * t2 + 2] != hs.T[3 * ht + 2]) CheckDiff++;
-                            }
                         }
                         else
                         {
@@ -331,11 +320,6 @@ namespace PotatoPainter
                     }
                     Perf.Stop(tk + " trace: sheet build", sw);
                 }
-            }
-            if (Check && !preview && CheckN > 0)
-            {
-                Plugin.Log.LogInfo($"Trace reuse check: {CheckN} close-up points taken from the owner pass, {CheckDiff} different from casting them again");
-                CheckN = 0; CheckDiff = 0;
             }
             return built;
         }

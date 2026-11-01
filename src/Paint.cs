@@ -40,7 +40,13 @@ namespace PotatoPainter
         internal bool Lit;   // an etched paint's own light (RuneLight); etched paints from before 0.4.3 have it on
         // Glow: the kept value is a share of the colour's cap (0.4.4 on) or an absolute strength (before).
         internal bool GlowShare;
-        internal Color Emission => Etched ? GlowCap.Emission(Glow, GlowShare) : Color.black;
+        // Drawn: dimmed in sunlight (SunDim, 0.4.9): surface colour and glow times Dim. The saved Col and Glow never change.
+        internal float Dim = 1f;
+        internal Color Emission { get { if (!Etched) return Color.black; var e = GlowCap.Emission(Glow, GlowShare) * Dim; e.a = 1f; return e; } }
+        internal Color DrawCol { get { if (!Etched) return Col; var c = Col * Dim; c.a = 1f; return c; } }
+        // The glow's share of its cap (older absolute strengths: their strength over the cap).
+        internal float Share => !Etched ? 0f : GlowShare ? Mathf.Clamp01(Glow.maxColorComponent) : Mathf.Clamp01(Glow.maxColorComponent / Mathf.Max(GlowCap.Cap(Glow, GlowCap.Bloom), 1e-3f));
+        private float nextSun;
         internal bool HasData;
         internal Transform CenterHost => built?.CenterHost;
 
@@ -180,7 +186,8 @@ namespace PotatoPainter
         {
             built?.Clear();
             var sw = Perf.Start();
-            built = Trace.Build(Frame, Size, Lift, Look.Material(Rune, Etched), Etched ? Look.HaloFor(Rune) : null, Col, Emission, false, (Etched ? "etch " : "paint ") + Rune.Art);
+            if (Etched) { Dim = SunDim.Factor(Glow, Share, Frame, Size, GlowCap.Bloom); nextSun = Time.time + 2f + Random.value; }
+            built = Trace.Build(Frame, Size, Lift, Look.Material(Rune, Etched), Etched ? Look.HaloFor(Rune) : null, DrawCol, Emission, false, (Etched ? "etch " : "paint ") + Rune.Art);
             Perf.Stop("paint trace size " + Size.ToString("0.0"), sw, built.Sheets);
             if (Etched && Lit && built.Sheets > 0)
             {
@@ -206,7 +213,7 @@ namespace PotatoPainter
         {
             if (built == null || !Etched) return false;
             var glow = Emission;
-            foreach (var r in built.Strokes) if (r) Look.Colour(r, Col, glow);
+            foreach (var r in built.Strokes) if (r) Look.Colour(r, DrawCol, glow);
             foreach (var h in built.Halos) if (h) Look.HaloColour(h, glow);
             if (built.Light) RuneLight.Tint(built.Light.GetComponent<Light>(), glow);
             return true;
@@ -215,7 +222,15 @@ namespace PotatoPainter
         private void Update()
         {
             if (ghost) { Preview(); return; }
-            if (!HasData || Time.time < nextCheck) return;
+            if (!HasData) return;
+            // The sun moves and things come and go in front of it: every two seconds or so.
+            if (Etched && built != null && Time.time >= nextSun && !GlowTest.Running)
+            {
+                nextSun = Time.time + 2f;
+                float f = SunDim.Factor(Glow, Share, Frame, Size, GlowCap.Bloom);
+                if (Mathf.Abs(f - Dim) > 0.01f) { Dim = f; Retint(); }
+            }
+            if (Time.time < nextCheck) return;
             nextCheck = Time.time + 2f;
             // Rebuild when what lies under it changed: something loaded after it, or unloaded, or was replaced.
             var hc = Perf.Start(); bool changed = !Trace.HostIds(Frame.Center, Size).SetEquals(built.Hosts); Perf.Stop("host check", hc);
@@ -266,6 +281,12 @@ namespace PotatoPainter
             if (!aimValid) { Grass.Clear(this); ghostGrassAt = null; if (previewLight) previewLight.enabled = false; return; }
             if (ghostGrassAt.HasValue && Vector3.Distance(ghostGrassAt.Value, aim.Center) > 0.25f) { Grass.Clear(this); ghostGrassAt = null; }
             aimLayer = LayerAt(aim.Center, size, null);
+            if (Etched)
+            {
+                // Dimmed in sunlight like the placed rune will be (SunDim).
+                float df = SunDim.Factor(kept, Settings.Glow, aim, size, GlowCap.Bloom);
+                col *= df; col.a = 1f; glow *= df; glow.a = 1f;
+            }
             var sw = Perf.Start();
             preview = Trace.Build(aim, size, 0.004f + 0.002f * aimLayer, Look.Material(Rune, Etched), Etched ? Look.HaloFor(Rune) : null, col, glow, true, "preview");
             previewCost = (float)sw.Elapsed.TotalSeconds;
@@ -273,7 +294,7 @@ namespace PotatoPainter
             // The rune's light in the preview too, so it shows what will be placed.
             // Not when the same lit rune already lies right there (just placed, the aim unmoved): its own light shows it.
             bool lit = aimLit && preview.Sheets > 0 && glow.maxColorComponent > 0f
-                && !Loaded.Any(p => p && p.HasData && Repeats(p, Rune, Etched, aim, size, col, kept, true, true));
+                && !Loaded.Any(p => p && p.HasData && Repeats(p, Rune, Etched, aim, size, aimCol, kept, true, true));
             if (lit && !previewLight)
             {
                 var lg = new GameObject(Trace.Prefix + "preview light");
