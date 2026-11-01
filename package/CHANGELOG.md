@@ -1,3 +1,7 @@
+## 0.4.12 (test build, not released)
+- Placing a large rune, or loading into an area with many runes, no longer stalls the game for a moment: the tracing work runs in the background and the rune appears a moment later.
+- Test build: the game log checks the first few runes traced in the background against the old way.
+
 ## 0.4.11 (test build, not released)
 - Aiming out of reach now says "Too far away to paint" (or etch) instead of "Nothing to paint on there".
 - Test build: the game log notes every refused click and why.

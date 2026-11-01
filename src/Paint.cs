@@ -49,11 +49,13 @@ namespace PotatoPainter
         internal float Share => !Etched ? 0f : GlowShare ? Mathf.Clamp01(Glow.maxColorComponent) : Mathf.Clamp01(Glow.maxColorComponent / Mathf.Max(GlowCap.Cap(Glow, GlowCap.Bloom), 1e-3f));
         private float nextSun;
         internal bool HasData;
-        internal Transform CenterHost => built?.CenterHost;
+        // While a new trace runs, the host found for it counts too (a host destroyed meanwhile still takes the paint).
+        internal Transform CenterHost => job != null && job.Built.CenterHost ? job.Built.CenterHost : built?.CenterHost;
 
         private ZNetView nview;
         private bool ghost, listed, placedWithoutAim, repeat;
         private Built built, preview;
+        private Trace.Job job;   // a trace running on the thread pool (0.4.12); the old drawing stays until it's done
         internal Built Drawn => built;
         private Light previewLight;   // the ghost's one light, moved with the preview (no LightLod: it would fade in on every retrace)
         private float nextCheck, previewTime;
@@ -186,23 +188,62 @@ namespace PotatoPainter
             nview.ClaimOwnership();
             nview.GetZDO().Set(KLayer, layer);
             Layer = layer;
-            if (built != null) Rebuild();
+            if (built != null || job != null) Rebuild();
         }
 
+        // Traced again: what lies under it is read now, the casts run on the thread pool, and the new drawing replaces the
+        // old one when they're done (Update), so placing or loading a large rune doesn't stall a frame (0.4.12).
         private void Rebuild()
         {
-            built?.Clear();
             var sw = Perf.Start();
             if (Etched) { UpdateDim(); nextSun = Time.time + 2f + Random.value; }
-            built = Trace.Build(Frame, Size, Lift, Look.Material(Rune, Etched), Etched ? Look.HaloFor(Rune) : null, DrawCol, Emission, false, (Etched ? "etch " : "paint ") + Rune.Art);
-            Perf.Stop("paint trace size " + Size.ToString("0.0"), sw, built.Sheets);
+            job = Trace.Job.Prepare(Frame, Size, Lift, Look.Material(Rune, Etched), Etched ? Look.HaloFor(Rune) : null, DrawCol, Emission, false, (Etched ? "etch " : "paint ") + Rune.Art);
+            Perf.Stop("paint trace: read hosts", sw);
+            Trace.Run(job);
+            nextCheck = Time.time + 2f + Random.value;
+        }
+
+        // The finished trace drawn in place of the old one.
+        private void Apply(Trace.Job j)
+        {
+            var sw = Perf.Start();
+            var nb = j.Finish();
+            Perf.Stop("paint trace: sheet build", sw, nb.Sheets);
+            if (!j.Done && j.Error == null) Perf.Add("paint trace: math (other thread)", j.ComputeMs, j.Casts);
+            built?.Clear();
+            built = nb;
             if (Etched && Lit && built.Sheets > 0)
             {
                 built.Light = RuneLight.Make(Frame, Size, Emission, built.CenterHost, "etch " + Rune.Art);
                 if (built.Light) built.Objects.Add(built.Light);
             }
-            nextCheck = Time.time + 2f + Random.value;
+            if (Etched) Retint();   // the sun may have moved while it traced
             Grass.Set(this, built.OnGround, Frame, Size);
+            if (checksLeft > 0 && !j.Done) Check(j);
+        }
+
+        // Test-only (0.4.12): the first few traces finished from the thread pool are traced again the old way, all on the
+        // game thread, and the sheets compared point for point. Taken out before release.
+        private static int checksLeft = 12;
+        private void Check(Trace.Job j)
+        {
+            checksLeft--;
+            var sync = Trace.Build(j.F, j.Size, j.Lift, j.Material, j.Halo, j.Col, j.Glow, false, j.Name + " check");
+            int diff = 0, points = 0;
+            bool same = sync.Sheets == built.Sheets && sync.Strokes.Count == built.Strokes.Count;
+            for (int i = 0; same && i < sync.Strokes.Count; i++)
+            {
+                var a = built.Strokes[i] ? built.Strokes[i].GetComponent<MeshFilter>()?.sharedMesh : null;
+                var b = sync.Strokes[i] ? sync.Strokes[i].GetComponent<MeshFilter>()?.sharedMesh : null;
+                if (!a || !b) { same = false; break; }
+                var va = a.vertices; var vb = b.vertices; var ta = a.triangles; var tb = b.triangles;
+                if (va.Length != vb.Length || ta.Length != tb.Length) { same = false; break; }
+                for (int v = 0; v < va.Length; v++) { points++; if (va[v] != vb[v]) diff++; }
+                for (int t = 0; t < ta.Length; t++) if (ta[t] != tb[t]) diff++;
+                if (built.Strokes[i].transform.parent != sync.Strokes[i].transform.parent) diff++;
+            }
+            sync.Clear();
+            Plugin.Log.LogInfo($"Trace thread check ({Rune?.Art}, size {Size:0.0}): {built.Sheets} sheets, {points} points, {(same ? diff + " different" : "sheet counts or sizes differ")} from tracing it all on the game thread");
         }
 
         // The sun dimming now (SunDim); true when it moved enough to redraw.
@@ -240,13 +281,19 @@ namespace PotatoPainter
         {
             if (ghost) { Preview(); return; }
             if (!HasData) return;
+            if (job != null)
+            {
+                if (!job.Ready || !Trace.TakeFinishSlot()) return;
+                var j = job; job = null;
+                Apply(j);
+            }
             // The sun moves and things come and go in front of it: every two seconds or so.
             if (Etched && built != null && Time.time >= nextSun)
             {
                 nextSun = Time.time + 2f;
                 if (UpdateDim()) Retint();
             }
-            if (Time.time < nextCheck) return;
+            if (Time.time < nextCheck || built == null) return;
             nextCheck = Time.time + 2f;
             // Rebuild when what lies under it changed: something loaded after it, or unloaded, or was replaced.
             var hc = Perf.Start(); bool changed = !Trace.HostIds(Frame.Center, Size).SetEquals(built.Hosts); Perf.Stop("host check", hc);
@@ -289,7 +336,7 @@ namespace PotatoPainter
             if (!aimValid && Trace.WhyHit)
             {
                 var key = Trace.RootOf(Trace.WhyHit).name + "|" + (Trace.Why ?? "farther than you can build");
-                if (logged.Add(key)) Plugin.Log.LogInfo($"Nothing to paint where you aim: {Trace.Why ?? "farther than you can build"}; {Trace.Describe(Trace.WhyHit)}");
+                if (logged.Add(key)) Plugin.Log.LogInfo($"Nothing to paint where you aim: {Trace.Why ?? "farther than you can build"}; {(Trace.WhyDetail != null ? Trace.WhyDetail + "; " : "")}{Trace.Describe(Trace.WhyHit)}");
             }
             if (!aimValid) { Grass.Clear(this); ghostGrassAt = null; if (previewLight) previewLight.enabled = false; return; }
             if (ghostGrassAt.HasValue && Vector3.Distance(ghostGrassAt.Value, aim.Center) > 0.25f) { Grass.Clear(this); ghostGrassAt = null; }
@@ -342,6 +389,7 @@ namespace PotatoPainter
 
         private void OnDestroy()
         {
+            job = null;   // a trace still running is dropped when it ends
             if (listed) Loaded.Remove(this);
             Grass.Clear(this);
             built?.Clear();

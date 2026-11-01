@@ -55,12 +55,13 @@ namespace PotatoPainter
         internal const string Prefix = "PotatoPainter ";
         internal static readonly int Mask = LayerMask.GetMask("Default", "static_solid", "Default_small", "piece", "terrain", "vehicle", "piece_nonsolid");
 
-        internal sealed class Surface { internal Vector3[] V; internal int[] T; internal Renderer R; internal Material[] TriMat; internal Vector2[] UV2; }
+        internal sealed class Surface { internal Vector3[] V; internal int[] T; internal Renderer R; internal Material[] TriMat; internal Vector2[] UV2; internal Matrix4x4 RToLocal, RNormalToLocal; }
 
         // One drawable version of a host: a detail level of one of its LOD groups (new, worn, broken), or its plain renderers.
         private sealed class Level
         {
             internal LODGroup Group; internal int Index; internal Transform Parent; internal bool Active;
+            internal bool HasParent; internal Matrix4x4 ToLocal, NormalToLocal;   // Parent's, when Prepare read it
             internal readonly List<Surface> Surfaces = new List<Surface>();
         }
 
@@ -146,155 +147,212 @@ namespace PotatoPainter
         // Traces the paint on everything under it. preview: only what is drawn up close right now, in world space, not
         // added to the game's model switching (the placement ghost). halo: drawn again on the same sheet with it (etched
         // runes, the way probe test 22 drew it), or null.
-        internal static Built Build(Frame f, float size, float lift, Material material, Material halo, Color col, Color glow, bool preview, string name)
+        // A trace in three steps (0.4.12; the user, 2026-11-01: placing a 2 m rune stalled a frame for 0.1 to 0.2 s): Prepare
+        // reads what lies under the paint (the game's objects, so on the game's thread), Compute does the casts and lays out
+        // the sheets (plain arrays only, so it can run on another thread), Finish makes the meshes and hangs them on the
+        // hosts (game thread). Build runs all three at once (the preview). Placed paints run Compute on the thread pool and
+        // Finish when it is done, one paint per frame (Paint.Update).
+        internal sealed class Job
         {
-            var built = new Built();
-            string tk = preview ? "preview" : "paint";   // test-only timing keys (Perf, 0.4.8)
-            var sw = Perf.Start();
-            var hosts = Hosts(f.Center, size, null);
-            Perf.Stop(tk + " trace: read hosts", sw, hosts.Count);
-            // The same set the paint compares against later (HostIds), so it only rebuilds when it really changed.
-            built.Hosts.UnionWith(HostIds(f.Center, size));
-            if (hosts.Count == 0 || !material) return built;
-            var n = f.Normal; var up = f.Up; var side = Vector3.Cross(n, up);
-            var plane = f.Tree ? new Plane { On = true, Point = f.Center, Normal = n, Band = size * 0.35f + 0.05f } : default;
-            int grid = Mathf.Clamp(Mathf.RoundToInt(size / 0.03f), 16, 96);
-            float reach = 0.25f + size * 0.25f, radius = size * 0.75f + reach;
-            int count = (grid + 1) * (grid + 1);
-            var starts = new Vector3[count]; var uvs = new Vector2[count];
-            for (int y = 0; y <= grid; y++)
-                for (int x = 0; x <= grid; x++)
-                {
-                    float u = (float)x / grid, v = (float)y / grid; int i = y * (grid + 1) + x;
-                    // u runs along side = Cross(n, up), which is the probe's side (pointing to the painter's right): for
-                    // side s perpendicular to n, Cross(n, Cross(s, n)) = s. Same layout as probe test 18 (not mirrored).
-                    starts[i] = f.Center + side * ((u - 0.5f) * size) + up * ((v - 0.5f) * size) + n * reach;
-                    uvs[i] = new Vector2(u, v);
-                }
+            internal Frame F; internal float Size, Lift; internal Material Material, Halo; internal Color Col, Glow; internal bool Preview; internal string Name;
+            internal Built Built = new Built();
+            internal bool Done;                 // nothing to compute (no hosts): Finish at once
+            internal volatile bool Ready;       // Compute finished (on its thread)
+            internal Exception Error;
+            internal double ComputeMs; internal int Casts;
+            private List<Host> hosts; private List<Surface>[] nearRef;
+            private readonly List<Sheet> sheets = new List<Sheet>();
 
-            // One cast index per surface list, made the first time a list is cast against (0.4.2).
-            var queries = new[] { starts[0], starts[grid], starts[count - 1 - grid], starts[count - 1], f.Center + n * reach };
-            int cells = Mathf.Clamp(grid / 2, 8, 48);
-            var indexes = new Dictionary<List<Surface>, CastIndex>();
-            CastIndex Ix(List<Surface> list)
+            private sealed class Sheet
             {
-                if (list == null || list.Count == 0) return null;
-                if (!indexes.TryGetValue(list, out var ix)) indexes[list] = ix = CastIndex.Make(list, n, side, queries, cells);
-                return ix;
+                internal int K; internal Level Lv; internal Vector3[] Verts, Normals, Bary; internal bool[] Ok; internal Vector2[] Uv2; internal int[] Corners, Tri, Owner;
+                internal Material HostMat; internal Renderer HostR; internal Surface HostSurface; internal bool AllOnHostR;
             }
 
-            // Which host owns each point: the one whose close-up surface is on top there. The owner's hit is kept (0.4.8):
-            // the close-up sheet of a host traces the same points on the same triangles, so it is used again there.
-            sw = Perf.Start();
-            var owner = new int[count]; for (int i = 0; i < count; i++) owner[i] = -1;
-            var oAt = new Vector3[count]; var oN = new Vector3[count]; var oS = new Surface[count]; var oT = new int[count]; var oU = new Vector2[count];
-            var nearRef = hosts.Select(h => Near(h.Reference, f.Center, radius)).ToList();
-            for (int i = 0; i < count; i++)
+            // Game thread: the hosts and their drawn surfaces, their positions now, and the host the centre lies on.
+            internal static Job Prepare(Frame f, float size, float lift, Material material, Material halo, Color col, Color glow, bool preview, string name)
             {
-                float best = float.MaxValue;
-                for (int k = 0; k < hosts.Count; k++)
-                    if (Cast(Ix(nearRef[k]), nearRef[k], starts[i], -n, reach * 2f, plane, out var at, out var an, out var hs0, out var ht0, out var hu0))
+                var j = new Job { F = f, Size = size, Lift = lift, Material = material, Halo = halo, Col = col, Glow = glow, Preview = preview, Name = name };
+                j.hosts = Hosts(f.Center, size, null);
+                // The same set the paint compares against later (HostIds), so it only rebuilds when it really changed.
+                j.Built.Hosts.UnionWith(HostIds(f.Center, size));
+                if (j.hosts.Count == 0 || !material) { j.Done = true; return j; }
+                // Where each detail level and renderer was when read (used by Finish, so a host that moves while Compute runs,
+                // a ship, still gets the paint where it was traced).
+                foreach (var h in j.hosts)
+                    foreach (var lv in h.Levels)
                     {
-                        float d = Vector3.Distance(starts[i], at);
-                        if (d < best) { best = d; owner[i] = k; oAt[i] = at; oN[i] = an; oS[i] = hs0; oT[i] = ht0; oU[i] = hu0; }
+                        lv.HasParent = lv.Parent; 
+                        if (lv.HasParent) { lv.ToLocal = lv.Parent.worldToLocalMatrix; lv.NormalToLocal = lv.Parent.localToWorldMatrix.transpose; }
+                        foreach (var sf in lv.Surfaces)
+                            if (sf.R) { sf.RToLocal = sf.R.transform.worldToLocalMatrix; sf.RNormalToLocal = sf.R.transform.localToWorldMatrix.transpose; }
                     }
-            }
-            // A host whose close-up surfaces are exactly one detail level (the usual case: one of new, worn or broken is
-            // shown): that level traced on Near(the same list) gives the same hits as the owner pass, point for point.
-            var reuse = hosts.Select(h =>
-            {
-                var close = h.Levels.Where(l => l.Active && l.Index == 0).ToList();
-                return close.Count == 1 && close[0].Surfaces.SequenceEqual(h.Reference);
-            }).ToArray();
-            Perf.Stop(tk + " trace: owner casts", sw, count * hosts.Count);
-            // The host the centre is painted on: the paint goes when it's destroyed.
-            {
+                // The host the centre is painted on (the paint goes when it's destroyed), known before Compute so a host
+                // destroyed while it runs still takes the paint with it.
+                var n = f.Normal; float reach = 0.25f + size * 0.25f, radius = size * 0.75f + reach;
+                var plane = f.Tree ? new Plane { On = true, Point = f.Center, Normal = n, Band = size * 0.35f + 0.05f } : default;
+                j.nearRef = j.hosts.Select(h => Near(h.Reference, f.Center, radius)).ToArray();
                 float best = float.MaxValue;
-                for (int k = 0; k < hosts.Count; k++)
-                    if (Cast(Ix(nearRef[k]), nearRef[k], f.Center + n * reach, -n, reach * 2f, plane, out var at, out _, out _, out _, out _))
+                for (int k = 0; k < j.hosts.Count; k++)
+                    if (Cast(j.nearRef[k], f.Center + n * reach, -n, reach * 2f, plane, out var at, out _, out _, out _, out _))
                     {
                         float d = Vector3.Distance(f.Center + n * reach, at);
-                        if (d < best) { best = d; built.CenterHost = hosts[k].Root; }
+                        if (d < best) { best = d; j.Built.CenterHost = j.hosts[k].Root; }
                     }
+                return j;
             }
 
-            var otherCache = new Dictionary<(int, int, bool), List<Surface>>();
-            List<Surface> Other(int j, Level like)
+            // Any thread: the casts and the sheets' points and triangles. Reads only the arrays Prepare made.
+            internal void Compute()
             {
-                var key = (j, like.Index, like.Active);
-                if (otherCache.TryGetValue(key, out var got)) return got;
-                var match = hosts[j].Levels.FirstOrDefault(l => l.Index == like.Index && l.Active == like.Active)
-                    ?? hosts[j].Levels.Where(l => l.Active == like.Active).OrderByDescending(l => l.Index).FirstOrDefault();
-                got = Near(match != null ? match.Surfaces : hosts[j].Reference, f.Center, radius);
-                otherCache[key] = got; return got;
-            }
-
-            for (int k = 0; k < hosts.Count; k++)
-            {
-                if (!owner.Contains(k)) continue;
-                foreach (var lv in hosts[k].Levels)
-                {
-                    if (preview && !(lv.Active && lv.Index == 0)) continue;
-                    var surfaces = Near(lv.Surfaces, f.Center, radius);
-                    var verts = new Vector3[count]; var normals = new Vector3[count]; var ok = new bool[count]; var uv2s = new Vector2[count];
-                    var corners = new int[count * 3]; var bary = new Vector3[count]; var hitR = new Renderer[count];
-                    // The surface material where the centre lands on this model: trees bend in the wind.
-                    Material hostMat = null; Renderer hostR = null;
-                    if (Cast(Ix(surfaces), surfaces, f.Center + n * reach, -n, reach * 2f, plane, out _, out _, out var cs, out var ct, out _) && cs.R && cs.TriMat != null) { hostMat = cs.TriMat[ct]; hostR = cs.R; }
-                    sw = Perf.Start(); int casts = 0;
-                    bool closeUp = lv.Active && lv.Index == 0;
-                    for (int i = 0; i < count; i++)
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                var f = F; float size = Size, lift = Lift; bool preview = Preview;
+                var n = f.Normal; var up = f.Up; var side = Vector3.Cross(n, up);
+                var plane = f.Tree ? new Plane { On = true, Point = f.Center, Normal = n, Band = size * 0.35f + 0.05f } : default;
+                int grid = Mathf.Clamp(Mathf.RoundToInt(size / 0.03f), 16, 96);
+                float reach = 0.25f + size * 0.25f, radius = size * 0.75f + reach;
+                int count = (grid + 1) * (grid + 1);
+                var starts = new Vector3[count];
+                for (int y = 0; y <= grid; y++)
+                    for (int x = 0; x <= grid; x++)
                     {
-                        if (owner[i] < 0) continue;
-                        // A corner on another piece (a seam) is traced on that piece, at the same detail level.
-                        Vector3 at, nn; Surface hs; int ht; Vector2 u2; bool hit;
-                        if (closeUp && reuse[owner[i]])
-                        {
-                            // Same hit as casting again (0.4.8's check: 0 different over 40+ placed traces, 2026-11-01).
-                            hit = true; at = oAt[i]; nn = oN[i]; hs = oS[i]; ht = oT[i]; u2 = oU[i];
-                        }
-                        else
-                        {
-                            var on = owner[i] == k ? surfaces : Other(owner[i], lv);
-                            hit = Cast(Ix(on), on, starts[i], -n, reach * 2f, plane, out at, out nn, out hs, out ht, out u2);
-                            casts++;
-                        }
-                        if (hit)
-                        {
-                            verts[i] = at + nn * lift; normals[i] = nn; uv2s[i] = u2; ok[i] = true;
-                            hitR[i] = hs.R;
-                            int i0 = hs.T[3 * ht], i1 = hs.T[3 * ht + 1], i2 = hs.T[3 * ht + 2];
-                            corners[3 * i] = i0; corners[3 * i + 1] = i1; corners[3 * i + 2] = i2;
-                            bary[i] = Barycentric(at, hs.V[i0], hs.V[i1], hs.V[i2]);
-                        }
+                        float u = (float)x / grid, v = (float)y / grid; int i = y * (grid + 1) + x;
+                        // u runs along side = Cross(n, up), which is the probe's side (pointing to the painter's right): for
+                        // side s perpendicular to n, Cross(n, Cross(s, n)) = s. Same layout as probe test 18 (not mirrored).
+                        starts[i] = f.Center + side * ((u - 0.5f) * size) + up * ((v - 0.5f) * size) + n * reach;
                     }
-                    Perf.Stop(tk + " trace: sheet casts", sw, casts);
-                    sw = Perf.Start();
-                    var tri = new List<int>(); float cell = size / grid * 2.5f;
-                    for (int y = 0; y < grid; y++)
-                        for (int x = 0; x < grid; x++)
-                        {
-                            int a = y * (grid + 1) + x, b = a + 1, c = a + grid + 1, d = c + 1;
-                            if (owner[a] != k || !(ok[a] && ok[b] && ok[c] && ok[d])) continue;
-                            if ((verts[a] - verts[b]).magnitude > cell || (verts[a] - verts[c]).magnitude > cell || (verts[d] - verts[b]).magnitude > cell || (verts[d] - verts[c]).magnitude > cell) continue;
-                            tri.AddRange(new[] { a, c, b, b, c, d, a, b, c, b, d, c });   // both faces
-                        }
-                    if (tri.Count == 0) { Perf.Stop(tk + " trace: sheet build", sw); continue; }
 
+                // One cast index per surface list, made the first time a list is cast against (0.4.2).
+                var queries = new[] { starts[0], starts[grid], starts[count - 1 - grid], starts[count - 1], f.Center + n * reach };
+                int cells = Mathf.Clamp(grid / 2, 8, 48);
+                var indexes = new Dictionary<List<Surface>, CastIndex>();
+                CastIndex Ix(List<Surface> list)
+                {
+                    if (list == null || list.Count == 0) return null;
+                    if (!indexes.TryGetValue(list, out var ix)) indexes[list] = ix = CastIndex.Make(list, n, side, queries, cells);
+                    return ix;
+                }
+
+                // Which host owns each point: the one whose close-up surface is on top there. The owner's hit is kept (0.4.8):
+                // the close-up sheet of a host traces the same points on the same triangles, so it is used again there.
+                var owner = new int[count]; for (int i = 0; i < count; i++) owner[i] = -1;
+                var oAt = new Vector3[count]; var oN = new Vector3[count]; var oS = new Surface[count]; var oT = new int[count]; var oU = new Vector2[count];
+                for (int i = 0; i < count; i++)
+                {
+                    float best = float.MaxValue;
+                    for (int k = 0; k < hosts.Count; k++)
+                        if (Cast(Ix(nearRef[k]), nearRef[k], starts[i], -n, reach * 2f, plane, out var at, out var an, out var hs0, out var ht0, out var hu0))
+                        {
+                            float d = Vector3.Distance(starts[i], at);
+                            if (d < best) { best = d; owner[i] = k; oAt[i] = at; oN[i] = an; oS[i] = hs0; oT[i] = ht0; oU[i] = hu0; }
+                        }
+                }
+                int casts = count * hosts.Count;
+                // A host whose close-up surfaces are exactly one detail level (the usual case: one of new, worn or broken is
+                // shown): that level traced on Near(the same list) gives the same hits as the owner pass, point for point.
+                var reuse = hosts.Select(h =>
+                {
+                    var close = h.Levels.Where(l => l.Active && l.Index == 0).ToList();
+                    return close.Count == 1 && close[0].Surfaces.SequenceEqual(h.Reference);
+                }).ToArray();
+
+                var otherCache = new Dictionary<(int, int, bool), List<Surface>>();
+                List<Surface> Other(int j, Level like)
+                {
+                    var key = (j, like.Index, like.Active);
+                    if (otherCache.TryGetValue(key, out var got)) return got;
+                    var match = hosts[j].Levels.FirstOrDefault(l => l.Index == like.Index && l.Active == like.Active)
+                        ?? hosts[j].Levels.Where(l => l.Active == like.Active).OrderByDescending(l => l.Index).FirstOrDefault();
+                    got = Near(match != null ? match.Surfaces : hosts[j].Reference, f.Center, radius);
+                    otherCache[key] = got; return got;
+                }
+
+                for (int k = 0; k < hosts.Count; k++)
+                {
+                    if (!owner.Contains(k)) continue;
+                    foreach (var lv in hosts[k].Levels)
+                    {
+                        if (preview && !(lv.Active && lv.Index == 0)) continue;
+                        var surfaces = Near(lv.Surfaces, f.Center, radius);
+                        var verts = new Vector3[count]; var normals = new Vector3[count]; var ok = new bool[count]; var uv2s = new Vector2[count];
+                        var corners = new int[count * 3]; var bary = new Vector3[count]; var hitR = new Renderer[count];
+                        // The surface material where the centre lands on this model: trees bend in the wind.
+                        Material hostMat = null; Renderer hostR = null; Surface hostS = null;
+                        if (Cast(Ix(surfaces), surfaces, f.Center + n * reach, -n, reach * 2f, plane, out _, out _, out var cs, out var ct, out _) && !ReferenceEquals(cs.R, null) && cs.TriMat != null) { hostMat = cs.TriMat[ct]; hostR = cs.R; hostS = cs; }
+                        bool closeUp = lv.Active && lv.Index == 0;
+                        for (int i = 0; i < count; i++)
+                        {
+                            if (owner[i] < 0) continue;
+                            // A corner on another piece (a seam) is traced on that piece, at the same detail level.
+                            Vector3 at, nn; Surface hs; int ht; Vector2 u2; bool hit;
+                            if (closeUp && reuse[owner[i]])
+                            {
+                                // Same hit as casting again (0.4.8's check: 0 different over 40+ placed traces, 2026-11-01).
+                                hit = true; at = oAt[i]; nn = oN[i]; hs = oS[i]; ht = oT[i]; u2 = oU[i];
+                            }
+                            else
+                            {
+                                var on = owner[i] == k ? surfaces : Other(owner[i], lv);
+                                hit = Cast(Ix(on), on, starts[i], -n, reach * 2f, plane, out at, out nn, out hs, out ht, out u2);
+                                casts++;
+                            }
+                            if (hit)
+                            {
+                                verts[i] = at + nn * lift; normals[i] = nn; uv2s[i] = u2; ok[i] = true;
+                                hitR[i] = hs.R;
+                                int i0 = hs.T[3 * ht], i1 = hs.T[3 * ht + 1], i2 = hs.T[3 * ht + 2];
+                                corners[3 * i] = i0; corners[3 * i + 1] = i1; corners[3 * i + 2] = i2;
+                                bary[i] = Barycentric(at, hs.V[i0], hs.V[i1], hs.V[i2]);
+                            }
+                        }
+                        var tri = new List<int>(); float cell = size / grid * 2.5f;
+                        for (int y = 0; y < grid; y++)
+                            for (int x = 0; x < grid; x++)
+                            {
+                                int a = y * (grid + 1) + x, b = a + 1, c = a + grid + 1, d = c + 1;
+                                if (owner[a] != k || !(ok[a] && ok[b] && ok[c] && ok[d])) continue;
+                                if ((verts[a] - verts[b]).magnitude > cell || (verts[a] - verts[c]).magnitude > cell || (verts[d] - verts[b]).magnitude > cell || (verts[d] - verts[c]).magnitude > cell) continue;
+                                tri.AddRange(new[] { a, c, b, b, c, d, a, b, c, b, d, c });   // both faces
+                            }
+                        if (tri.Count == 0) continue;
+                        bool all = true;
+                        for (int i = 0; i < count && all; i++) if (ok[i] && !ReferenceEquals(hitR[i], hostR)) all = false;
+                        sheets.Add(new Sheet { K = k, Lv = lv, Verts = verts, Normals = normals, Bary = bary, Ok = ok, Uv2 = uv2s, Corners = corners, Tri = tri.ToArray(), Owner = owner, HostMat = hostMat, HostR = hostR, HostSurface = hostS, AllOnHostR = all });
+                    }
+                }
+                Casts = casts; ComputeMs = sw.Elapsed.TotalMilliseconds;
+            }
+
+            // Game thread: the meshes, hung on the hosts (skipping any host or detail level destroyed since Prepare).
+            internal Built Finish()
+            {
+                var built = Built;
+                if (Done) return built;
+                if (Error != null) { Plugin.Log.LogWarning($"PotatoPainter: tracing {Name} failed: {Error}"); return built; }
+                var f = F; float size = Size, lift = Lift; bool preview = Preview; var material = Material; var halo = Halo; var col = Col; var glow = Glow; var name = Name;
+                int grid = Mathf.Clamp(Mathf.RoundToInt(size / 0.03f), 16, 96);
+                int count = (grid + 1) * (grid + 1);
+                var uvs = new Vector2[count];
+                for (int y = 0; y <= grid; y++)
+                    for (int x = 0; x <= grid; x++) uvs[y * (grid + 1) + x] = new Vector2((float)x / grid, (float)y / grid);
+                foreach (var sh in sheets)
+                {
+                    var lv = sh.Lv; int k = sh.K; var verts = sh.Verts; var normals = sh.Normals; var ok = sh.Ok; var corners = sh.Corners; var bary = sh.Bary; var owner = sh.Owner;
+                    var hostMat = sh.HostMat; var hostR = sh.HostR;
+                    if (!hosts[k].Root || (lv.HasParent && !lv.Parent)) continue;
                     // Trees: bent on the CPU exactly like the bark's triangles, when the bark has no flutter or push and every
                     // point landed on that one bark renderer (probe test 14). Otherwise drawn still.
                     bool sway = Bend.Sways(hostMat);
-                    bool cpu = sway && !preview && hostR && hostMat.GetFloat("_PushDistance") == 0f
-                        && Enumerable.Range(0, count).All(i => !ok[i] || hitR[i] == hostR);
+                    bool cpu = sway && !preview && hostR && hostMat.GetFloat("_PushDistance") == 0f && sh.AllOnHostR;
                     // Built in the host's own space, so it moves with it and the game shows it with that detail level.
                     var parent = preview ? null : (cpu ? hostR.transform : lv.Parent);
                     if (parent)
                     {
-                        var toLocal = parent.worldToLocalMatrix; var normalToLocal = parent.localToWorldMatrix.transpose;
+                        var toLocal = cpu ? sh.HostSurface.RToLocal : lv.ToLocal; var normalToLocal = cpu ? sh.HostSurface.RNormalToLocal : lv.NormalToLocal;
                         for (int i = 0; i < count; i++) if (ok[i]) { verts[i] = toLocal.MultiplyPoint3x4(verts[i]); normals[i] = normalToLocal.MultiplyVector(normals[i]).normalized; }
                     }
                     var mesh = new Mesh { name = Prefix + "sheet" };
-                    mesh.vertices = verts; mesh.normals = normals; mesh.uv = uvs; mesh.colors = Enumerable.Repeat(Color.white, count).ToArray(); mesh.uv2 = uv2s; mesh.triangles = tri.ToArray();
+                    mesh.vertices = verts; mesh.normals = normals; mesh.uv = uvs; mesh.colors = Enumerable.Repeat(Color.white, count).ToArray(); mesh.uv2 = sh.Uv2; mesh.triangles = sh.Tri;
                     mesh.RecalculateTangents(); mesh.RecalculateBounds();
                     var go = new GameObject(Prefix + name + " LOD" + lv.Index);
                     go.layer = parent ? parent.gameObject.layer : hosts[k].Root.gameObject.layer;
@@ -355,10 +413,45 @@ namespace PotatoPainter
                         built.Registered.Add((lv.Group, lv.Index, r));
                         if (hr) built.Registered.Add((lv.Group, lv.Index, hr));
                     }
-                    Perf.Stop(tk + " trace: sheet build", sw);
                 }
+                return built;
             }
+        }
+
+        // All three steps at once, on the game thread (the preview; timed for the Perf line).
+        internal static Built Build(Frame f, float size, float lift, Material material, Material halo, Color col, Color glow, bool preview, string name)
+        {
+            string tk = preview ? "preview" : "paint";   // test-only timing keys (Perf)
+            var sw = Perf.Start();
+            var j = Job.Prepare(f, size, lift, material, halo, col, glow, preview, name);
+            Perf.Stop(tk + " trace: read hosts", sw);
+            if (j.Done) return j.Finish();
+            j.Compute();
+            Perf.Add(tk + " trace: math", j.ComputeMs, j.Casts);
+            sw = Perf.Start();
+            var built = j.Finish();
+            Perf.Stop(tk + " trace: sheet build", sw, built.Sheets);
             return built;
+        }
+
+        // Compute on the thread pool. The job is Ready when it is done (Error set if it threw).
+        internal static void Run(Job j)
+        {
+            if (j.Done) { j.Ready = true; return; }
+            System.Threading.ThreadPool.QueueUserWorkItem(_ =>
+            {
+                try { j.Compute(); }
+                catch (Exception e) { j.Error = e; }
+                finally { j.Ready = true; }
+            });
+        }
+
+        // One paint finished per frame, so many paints loading at once don't land in the same frame.
+        private static int finishFrame = -1;
+        internal static bool TakeFinishSlot()
+        {
+            if (finishFrame == Time.frameCount) return false;
+            finishFrame = Time.frameCount; return true;
         }
 
         // The roots of everything a paint of this size at this spot could lie on (pieces, trees, rocks, the ground).
@@ -661,7 +754,7 @@ namespace PotatoPainter
                     Vector3 a = s.V[s.T[i]], b = s.V[s.T[i + 1]], c = s.V[s.T[i + 2]];
                     if ((Closest(center, a, b, c) - center).sqrMagnitude <= r2) { keep.Add(s.T[i]); keep.Add(s.T[i + 1]); keep.Add(s.T[i + 2]); if (s.TriMat != null) keepMat.Add(s.TriMat[i / 3]); }
                 }
-                if (keep.Count > 0) list.Add(new Surface { V = s.V, T = keep.ToArray(), R = s.R, TriMat = s.TriMat != null ? keepMat.ToArray() : null, UV2 = s.UV2 });
+                if (keep.Count > 0) list.Add(new Surface { V = s.V, T = keep.ToArray(), R = s.R, TriMat = s.TriMat != null ? keepMat.ToArray() : null, UV2 = s.UV2, RToLocal = s.RToLocal, RNormalToLocal = s.RNormalToLocal });
             }
             return list;
         }

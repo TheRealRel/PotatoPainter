@@ -24,6 +24,13 @@ namespace PotatoPainter
             s.N++; s.Total += ms; if (ms > s.Max) s.Max = ms; s.A += a; s.B += b;
         }
 
+        // A time measured elsewhere (a trace's math on another thread), in ms.
+        internal static void Add(string key, double ms, long a = 0, long b = 0)
+        {
+            if (!stats.TryGetValue(key, out var s)) stats[key] = s = new Stat();
+            s.N++; s.Total += ms; if (ms > s.Max) s.Max = ms; s.A += a; s.B += b;
+        }
+
         // Once a frame (Plugin.LateUpdate).
         internal static void Frame()
         {
