@@ -23,7 +23,7 @@ namespace PotatoPainter
     [NetworkCompatibility(CompatibilityLevel.EveryoneMustHaveMod, VersionStrictness.Minor)]
     public class Plugin : BaseUnityPlugin
     {
-        public const string Id = "potato.painter", Version = "0.4.6";
+        public const string Id = "potato.painter", Version = "0.4.7";
         // Saved in worlds and inventories: never rename.
         public const string ToolPrefab = "potato_runakefli";
         public const string TablePrefab = "_PotatoRunakefliPieceTable";
@@ -146,6 +146,7 @@ namespace PotatoPainter
 
         private void Update()
         {
+            ShadowTest.Update();
             if (Doomed.Count > 0)
             {
                 foreach (var p in Doomed.ToList()) if (p) p.Delete();

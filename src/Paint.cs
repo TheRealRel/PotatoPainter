@@ -191,6 +191,16 @@ namespace PotatoPainter
             Grass.Set(this, built.OnGround, Frame, Size);
         }
 
+        // Test-only (ShadowTest, 0.4.7): the rune light made again, with or without shadows. True when one was made.
+        internal bool RemakeLight()
+        {
+            if (built == null || !Etched || !Lit || built.Sheets == 0) return false;
+            if (built.Light) { built.Objects.Remove(built.Light); Destroy(built.Light); }
+            built.Light = RuneLight.Make(Frame, Size, Emission, built.CenterHost, "etch " + Rune.Art);
+            if (built.Light) built.Objects.Add(built.Light);
+            return built.Light;
+        }
+
         // The glow drawn again at its cap for the bloom setting now (GlowCap.Update). True when something was redrawn.
         internal bool Retint()
         {

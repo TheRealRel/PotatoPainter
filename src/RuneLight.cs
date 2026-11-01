@@ -14,6 +14,15 @@ namespace PotatoPainter
         // torches 80 m), so a rune light gives way to a torch at the same distance.
         internal const float RangePerSize = 7f, IntensityPerGlow = 1.2f, Off = 0.15f, LodDistance = 30f;
 
+        // Test-only (0.4.7, the user: "Let's test it, if it affects performance (maybe a toggle, if possible). Otherwise we'll
+        // not use it."): rune lights with shadows, switched with Right Ctrl + L (ShadowTest). The game's LightLod then gives
+        // shadows only to lights ranked under the Point light shadows graphics setting (m_shadowLimit) and within its
+        // m_shadowDistance, fading them in and out over about a second (assembly_valheim LightLod.Awake and UpdateLoop, read
+        // 2026-11-01; Awake drops the shadow LOD when the light has no shadows, so lights are remade on a switch). 20 m is
+        // the torches' m_shadowDistance (research-2.md).
+        internal static bool Shadows;
+        internal const float ShadowDistance = 20f;
+
         // The light's colour: the glow's hue at full brightness. Its strength: the glow's strength (the brightest channel).
         internal static Color Hue(Color glow)
         {
@@ -33,9 +42,11 @@ namespace PotatoPainter
             go.SetActive(false);
             if (parent) go.transform.SetParent(parent, false);
             go.transform.position = f.Center + f.Normal * Off;
-            Setup(go.AddComponent<Light>(), size, glow);
+            var l = go.AddComponent<Light>();
+            Setup(l, size, glow);
+            if (Shadows) { l.shadows = LightShadows.Soft; l.shadowStrength = 1f; }
             var lod = go.AddComponent<LightLod>();
-            lod.m_lightLod = true; lod.m_lightDistance = LodDistance; lod.m_shadowLod = false;
+            lod.m_lightLod = true; lod.m_lightDistance = LodDistance; lod.m_shadowLod = Shadows; lod.m_shadowDistance = ShadowDistance;
             go.SetActive(true);
             return go;
         }
