@@ -1,3 +1,6 @@
+## 0.4.5 (test build, not released)
+- Test build: placing an etched rune now runs a finer glow test, every colour in small steps, by day and at night (about a minute, hold still).
+
 ## 0.4.4 (test build, not released)
 - Etched glow no longer goes flat: the Glow slider now runs from 25% to 100% of the most each colour can take before it washes out to white or fills up to a solid block, measured on screen for every colour. With bloom on the limit is lower than with it off, so each player sees the glow at its best for their own bloom setting, and runes change with it when bloom is switched.
 - Etched runes from earlier builds keep their glow, held to the new limit.
