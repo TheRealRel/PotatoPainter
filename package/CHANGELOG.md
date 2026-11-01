@@ -1,3 +1,8 @@
+## 0.4.4 (test build, not released)
+- Etched glow no longer goes flat: the Glow slider now runs from 25% to 100% of the most each colour can take before it washes out to white or fills up to a solid block, measured on screen for every colour. With bloom on the limit is lower than with it off, so each player sees the glow at its best for their own bloom setting, and runes change with it when bloom is switched.
+- Etched runes from earlier builds keep their glow, held to the new limit.
+- Test build: placing an etched rune now checks the new limits (about 20 seconds, hold still).
+
 ## 0.4.3 (test build, not released)
 - Etched runes give off light again, like the early glow tests: a soft light in the rune's colour that lights the surface around it, so it reads as glowing with bloom on or off. The Etched panel has a Light button (on by default); each rune keeps the setting it was etched with. Etched runes from earlier builds have it on.
 - Test build: every etched rune you place starts a glow test that reads the screen for about half a minute (hold still), to find where each colour stops clipping.

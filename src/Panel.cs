@@ -16,7 +16,8 @@ namespace PotatoPainter
 {
     internal static class Settings
     {
-        internal const float SizeMin = 0.25f, SizeMax = 2f, GlowMin = 0.25f, GlowMax = 2f;
+        // Glow: a share of the colour's cap (GlowCap, 0.4.4), 25% to 100%.
+        internal const float SizeMin = 0.25f, SizeMax = 2f, GlowMin = 0.25f, GlowMax = 1f;
         // An etched rune's strokes: its glow colour at this share, so the default (ember) comes out close to the red ochre
         // the Rúnakefli's own etched word has under its glow.
         internal const float EtchedSurface = 0.62f;
@@ -42,9 +43,13 @@ namespace PotatoPainter
         internal static Color PaintColor => Opaque(Color.HSVToRGB(PaintH, PaintS, PaintV));
         internal static Color GlowColor => Opaque(Color.HSVToRGB(EtchH, EtchS, 1f));
         internal static Color EtchColor => Opaque(GlowColor * EtchedSurface);
-        internal static Color Emission => Opaque(GlowColor * Glow);
+        // Kept with the paint: the glow's hue at full brightness times its share of the cap.
+        internal static Color KeptGlow => Opaque(GlowColor * Glow);
+        // Drawn: that share of the cap for this colour and the bloom setting now.
+        internal static Color Emission => GlowCap.Emission(KeptGlow, true);
 
         internal static Color Colour(bool etched) => etched ? EtchColor : PaintColor;
+        internal static Color KeptFor(bool etched) => etched ? KeptGlow : Color.black;
         internal static Color GlowFor(bool etched) => etched ? Emission : Color.black;
 
         private static Color Opaque(Color c) { c.a = 1f; return c; }
@@ -54,6 +59,7 @@ namespace PotatoPainter
         {
             Defaults(true, true);
             if (!player || !player.m_customData.TryGetValue(SaveKey, out var text)) return;
+            float oldStrength = -1f; bool share = false;
             foreach (var entry in text.Split(';'))
             {
                 int split = entry.IndexOf('=');
@@ -65,11 +71,14 @@ namespace PotatoPainter
                     case "pv": PaintV = Mathf.Clamp01(v); break;
                     case "eh": EtchH = Mathf.Clamp01(v); break;
                     case "es": EtchS = Mathf.Clamp01(v); break;
-                    case "eg": Glow = Mathf.Clamp(v, GlowMin, GlowMax); break;
+                    case "eg": oldStrength = v; break;   // before 0.4.4: a strength, 0.25 to 2
+                    case "gs": Glow = Mathf.Clamp(v, GlowMin, GlowMax); share = true; break;
                     case "sz": Size = Mathf.Clamp(v, SizeMin, SizeMax); break;
                     case "el": Light = v != 0f; break;
                 }
             }
+            // A strength kept before 0.4.4 becomes the same strength as a share of this colour's cap (with bloom, the lower one).
+            if (!share && oldStrength > 0f) Glow = Mathf.Clamp(oldStrength / GlowCap.Cap(GlowColor, true), GlowMin, GlowMax);
             Version++;
         }
 
@@ -77,7 +86,7 @@ namespace PotatoPainter
         {
             if (!player) return;
             string F(float v) => v.ToString("0.####", CultureInfo.InvariantCulture);
-            player.m_customData[SaveKey] = $"ph={F(PaintH)};ps={F(PaintS)};pv={F(PaintV)};eh={F(EtchH)};es={F(EtchS)};eg={F(Glow)};sz={F(Size)};el={(Light ? 1 : 0)}";
+            player.m_customData[SaveKey] = $"ph={F(PaintH)};ps={F(PaintS)};pv={F(PaintV)};eh={F(EtchH)};es={F(EtchS)};gs={F(Glow)};sz={F(Size)};el={(Light ? 1 : 0)}";
             Version++;
         }
     }
@@ -188,7 +197,7 @@ namespace PotatoPainter
             float h = rows[0].Slider.value, s = rows[1].Slider.value, third = rows[2].Slider.value;
             rows[0].Value.text = Mathf.RoundToInt(h * 360f).ToString(CultureInfo.InvariantCulture) + "°";
             rows[1].Value.text = Mathf.RoundToInt(s * 100f).ToString(CultureInfo.InvariantCulture) + "%";
-            rows[2].Value.text = etched ? "x" + third.ToString("0.00", CultureInfo.InvariantCulture) : Mathf.RoundToInt(third * 100f).ToString(CultureInfo.InvariantCulture) + "%";
+            rows[2].Value.text = Mathf.RoundToInt(third * 100f).ToString(CultureInfo.InvariantCulture) + "%";
             rows[3].Value.text = Settings.Size.ToString("0.00", CultureInfo.InvariantCulture) + " m";
             swatch.color = etched ? Settings.GlowColor : Settings.PaintColor;
             if (lightButton)
@@ -200,10 +209,11 @@ namespace PotatoPainter
                 else { var legacy = lightButton.GetComponentInChildren<Text>(true); if (legacy) legacy.text = label; }
             }
             // Each strip shows what moving its slider does: every hue, then grey to full colour, then dark to light (painted)
-            // or the glow from faint to strong, drawn at a quarter so the strip stays readable.
+            // or the glow from faint to its cap (GlowCap).
             Paint(rows[0], x => Color.HSVToRGB(x, 1f, 1f));
             Paint(rows[1], x => Color.HSVToRGB(h, x, etched ? 1f : Mathf.Max(third, 0.35f)));
-            if (etched) Paint(rows[2], x => Color.HSVToRGB(h, s, Mathf.Clamp01(Mathf.Lerp(Settings.GlowMin, Settings.GlowMax, x) * 0.5f)));
+            float cap = GlowCap.Cap(Color.HSVToRGB(h, s, 1f), GlowCap.Bloom);
+            if (etched) Paint(rows[2], x => Color.HSVToRGB(h, s, Mathf.Clamp01(Mathf.Lerp(Settings.GlowMin, Settings.GlowMax, x) * cap)));
             else Paint(rows[2], x => Color.HSVToRGB(h, s, x));
         }
 

@@ -1,8 +1,10 @@
-// Test-only (0.4.3, the user: "Bloom also effects the glow drastically. It triggers bloom pretty bad and looks flat when
+// Test-only (0.4.3, 0.4.4; the user: "Bloom also effects the glow drastically. It triggers bloom pretty bad and looks flat when
 // it's off."): reads the finished screen while an etched rune glows in a set of colours at every strength, with its light
 // off and on, so each colour can get a glow cap where it stops clipping (screenshots of the hand had half of the bright
-// pixels at 250+ in a channel, even with bloom off). Starts on every etched rune placed by this player; the camera and the
-// rune stay put for about half a minute. Same screen reading as probe tests 19 to 22. Take out before release.
+// pixels at 250+ in a channel, even with bloom off). 0.4.4: checks the caps (GlowCap) instead: each colour at 25% to 150%
+// of its cap for the bloom setting now, rune light on, plus three half-saturated colours (the caps blend toward white by
+// saturation, unmeasured so far). Starts on every etched rune placed by this player; the camera and the rune stay put for
+// about 20 seconds. Same screen reading as probe tests 19 to 22. Take out before release.
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -18,8 +20,10 @@ namespace PotatoPainter
             ("ember", Look.Ember), ("red", new Color(1f, 0f, 0f)), ("orange", new Color(1f, 0.5f, 0f)), ("yellow", new Color(1f, 1f, 0f)),
             ("green", new Color(0f, 1f, 0f)), ("cyan", new Color(0f, 1f, 1f)), ("blue", new Color(0f, 0f, 1f)), ("violet", new Color(0.5f, 0f, 1f)),
             ("magenta", new Color(1f, 0f, 1f)), ("white", new Color(1f, 1f, 1f)),
+            ("ember half", Color.HSVToRGB(0.0445f, 0.5f, 1f)), ("cyan half", Color.HSVToRGB(0.5f, 0.5f, 1f)), ("blue half", Color.HSVToRGB(0.6667f, 0.5f, 1f)),
         };
-        private static readonly float[] Strengths = { 0f, 0.25f, 0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f };
+        // Shares of the cap.
+        private static readonly float[] Shares = { 0.25f, 0.5f, 0.75f, 1f, 1.25f, 1.5f };
         private static bool running;
 
         internal static void Run(Paint p)
@@ -38,34 +42,35 @@ namespace PotatoPainter
             {
                 var colours = new List<(string, Color)> { ("yours", RuneLight.Hue(p.Glow)) };
                 colours.AddRange(Colours);
-                int shots = 1 + 2 * colours.Count * Strengths.Length;
-                player?.Message(MessageHud.MessageType.TopLeft, $"Glow test: hold still, about {Mathf.CeilToInt(shots * 0.15f + 2f)} s");
+                int shots = 1 + colours.Count * Shares.Length;
+                player?.Message(MessageHud.MessageType.TopLeft, $"Glow test: hold still, about {Mathf.CeilToInt(shots * 0.2f + 2f)} s");
                 // Its own light fades in over a second (LightLod); the preview goes away.
                 yield return new WaitForSeconds(1.5f);
                 if (!Alive(p)) { Plugin.Log.LogInfo("Glow test stopped: the rune is gone"); yield break; }
                 var cam = Utils.GetMainCamera();
-                Plugin.Log.LogInfo($"Glow test start: {p.Rune.Art}, size {p.Size:0.00} m, {(cam ? Vector3.Distance(cam.transform.position, p.Frame.Center).ToString("0.0") : "?")} m from the camera, glow {p.Glow} (strength {p.Glow.maxColorComponent:0.00}), surface {p.Col}, light {(p.Lit ? "on" : "off")}; {shots} screens; game point light limit {LightLod.m_lightLimit}; {LightNow()}; {CameraNow()}");
+                Plugin.Log.LogInfo($"Glow test start: {p.Rune.Art}, size {p.Size:0.00} m, {(cam ? Vector3.Distance(cam.transform.position, p.Frame.Center).ToString("0.0") : "?")} m from the camera, kept glow {p.Glow} ({(p.GlowShare ? "share of the cap" : "strength")} {p.Glow.maxColorComponent:0.00}), drawn {p.Emission}, surface {p.Col}, light {(p.Lit ? "on" : "off")}; {shots} screens; game point light limit {LightLod.m_lightLimit}; {LightNow()}; {CameraNow()}");
                 yield return Shot(p, "as placed", null);
 
                 testLight = new GameObject(Trace.Prefix + "glow test light");
                 testLight.transform.position = p.Frame.Center + p.Frame.Normal * RuneLight.Off;
                 var light = testLight.AddComponent<Light>();
                 light.enabled = false;
-                foreach (bool lit in new[] { false, true })
+                bool bloom = GlowCap.Bloom;
+                Plugin.Log.LogInfo($"Glow test, caps for bloom {(bloom ? "on" : "off")}, rune light on (range {RuneLight.RangePerSize} x size, intensity {RuneLight.IntensityPerGlow} x strength); {LightNow()}");
+                foreach (var (name, hue) in colours)
                 {
-                    Plugin.Log.LogInfo($"Glow test, rune light {(lit ? $"on (range {RuneLight.RangePerSize} x size, intensity {RuneLight.IntensityPerGlow} x strength)" : "off")}; {LightNow()}");
-                    foreach (var (name, hue) in colours)
-                        foreach (float k in Strengths)
-                        {
-                            if (!Alive(p)) { Plugin.Log.LogInfo("Glow test stopped: the rune is gone"); yield break; }
-                            var glow = hue * k; glow.a = 1f;
-                            if (p.Drawn?.Light) p.Drawn.Light.SetActive(false);
-                            foreach (var r in p.Drawn.Strokes) if (r) Block(r, hue * Settings.EtchedSurface, glow);
-                            foreach (var h in p.Drawn.Halos) if (h) Look.HaloColour(h, glow);
-                            light.enabled = lit && k > 0f;
-                            if (light.enabled) RuneLight.Setup(light, p.Size, glow);
-                            yield return Shot(p, $"light {(lit ? "on" : "off")} {name} x{k:0.00} (emission {glow})", light.enabled ? light : null);
-                        }
+                    float cap = GlowCap.Cap(hue, bloom);
+                    foreach (float k in Shares)
+                    {
+                        if (!Alive(p)) { Plugin.Log.LogInfo("Glow test stopped: the rune is gone"); yield break; }
+                        var glow = hue * (k * cap); glow.a = 1f;
+                        if (p.Drawn?.Light) p.Drawn.Light.SetActive(false);
+                        foreach (var r in p.Drawn.Strokes) if (r) Block(r, hue * Settings.EtchedSurface, glow);
+                        foreach (var h in p.Drawn.Halos) if (h) Look.HaloColour(h, glow);
+                        light.enabled = true;
+                        RuneLight.Setup(light, p.Size, glow);
+                        yield return Shot(p, $"cap {name} {k * 100f:0}% of {cap:0.00} = x{k * cap:0.00} (emission {glow})", light);
+                    }
                 }
                 Plugin.Log.LogInfo($"Glow test done; {LightNow()}");
                 player?.Message(MessageHud.MessageType.TopLeft, "Glow test done");
@@ -75,8 +80,8 @@ namespace PotatoPainter
                 if (testLight) UnityEngine.Object.Destroy(testLight);
                 if (Alive(p))
                 {
-                    foreach (var r in p.Drawn.Strokes) if (r) Look.Colour(r, p.Col, p.Glow);
-                    foreach (var h in p.Drawn.Halos) if (h) Look.HaloColour(h, p.Glow);
+                    foreach (var r in p.Drawn.Strokes) if (r) Look.Colour(r, p.Col, p.Emission);
+                    foreach (var h in p.Drawn.Halos) if (h) Look.HaloColour(h, p.Emission);
                     if (p.Drawn.Light) p.Drawn.Light.SetActive(true);
                 }
                 Paint.HidePreview = false;

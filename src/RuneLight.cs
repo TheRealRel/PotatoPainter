@@ -40,6 +40,15 @@ namespace PotatoPainter
             return go;
         }
 
+        // A new glow strength for a light already made (the bloom setting changed): colour and intensity only; LightLod
+        // fades a light by its range, which it read when the light was made (LightLod.m_baseRange).
+        internal static void Tint(Light l, Color glow)
+        {
+            if (!l) return;
+            l.color = Hue(glow);
+            l.intensity = Intensity(glow);
+        }
+
         internal static void Setup(Light l, float size, Color glow)
         {
             l.type = LightType.Point;
