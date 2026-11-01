@@ -1,3 +1,8 @@
+## 0.4.3 (test build, not released)
+- Etched runes give off light again, like the early glow tests: a soft light in the rune's colour that lights the surface around it, so it reads as glowing with bloom on or off. The Etched panel has a Light button (on by default); each rune keeps the setting it was etched with. Etched runes from earlier builds have it on.
+- Test build: every etched rune you place starts a glow test that reads the screen for about half a minute (hold still), to find where each colour stops clipping.
+- Symbol hiding no longer looks up a build menu list by a name another mod also uses.
+
 ## 0.4.2 (test build, not released)
 - Large paints no longer drag the frame rate down: tracing a paint onto surfaces is much faster, and paint on the ground is only reshaped when the ground's drawn shape can have changed (not on every step you take near it).
 - A slow preview waits a little longer before tracing again, so it can't take over the frame.

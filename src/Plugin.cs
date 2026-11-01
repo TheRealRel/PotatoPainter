@@ -23,7 +23,7 @@ namespace PotatoPainter
     [NetworkCompatibility(CompatibilityLevel.EveryoneMustHaveMod, VersionStrictness.Minor)]
     public class Plugin : BaseUnityPlugin
     {
-        public const string Id = "potato.painter", Version = "0.4.2";
+        public const string Id = "potato.painter", Version = "0.4.3";
         // Saved in worlds and inventories: never rename.
         public const string ToolPrefab = "potato_runakefli";
         public const string TablePrefab = "_PotatoRunakefliPieceTable";
@@ -39,6 +39,7 @@ namespace PotatoPainter
         private static string refused;
 
         internal static ManualLogSource Log;
+        internal static Plugin Instance;
         internal static PieceTable Table;
         internal static readonly HashSet<Paint> Doomed = new HashSet<Paint>();
         internal static readonly AccessTools.FieldRef<Player, PieceTable> BuildPieces = AccessTools.FieldRefAccess<Player, PieceTable>("m_buildPieces");
@@ -47,6 +48,7 @@ namespace PotatoPainter
         private void Awake()
         {
             Log = Logger;
+            Instance = this;
             new Harmony(Id).PatchAll(typeof(Plugin).Assembly);
             PrefabManager.OnVanillaPrefabsAvailable += AddContent;
         }

@@ -3,7 +3,6 @@
 // has it (the same death adds it to the killer's own keys, Player.AddUniqueKey, saved with the character), so a new
 // character on a world where the boss is down has it, and so does a character who killed it on another world. The key
 // names are read from the boss prefabs (Character.m_defeatSetGlobalKey), not written here.
-using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using HarmonyLib;
@@ -52,9 +51,10 @@ namespace PotatoPainter
         [HarmonyPatch(typeof(PieceTable), nameof(PieceTable.UpdateAvailable))]
         internal static class HideLocked
         {
-            private static readonly AccessTools.FieldRef<PieceTable, object> Available = AccessTools.FieldRefAccess<PieceTable, object>("m_availablePieces");
-            private static readonly AccessTools.FieldRef<PieceTable, object> Enabled = AccessTools.FieldRefAccess<PieceTable, object>("m_enabledPieces");
-            private static readonly AccessTools.FieldRef<PieceTable, object> ByCategory = AccessTools.FieldRefAccess<PieceTable, object>("m_availablePiecesByCategory");
+            // Valheim 1.0: m_availablePieces and m_enabledPieces are public HashSet<Piece>s, used directly (0.4.2 looked
+            // m_availablePieces up by name, which kept Valheim10Compatibility from adding its pre-1.0 alias of that name);
+            // the per-tab lists are private, List<List<Piece>>.
+            private static readonly AccessTools.FieldRef<PieceTable, List<List<Piece>>> ByCategory = AccessTools.FieldRefAccess<PieceTable, List<List<Piece>>>("m_availablePiecesByCategory");
 
             // __1: the player (UpdateAvailable(knownRecipes, player, hideUnavailable, noPlacementCost)).
             private static void Postfix(PieceTable __instance, Player __1)
@@ -72,20 +72,14 @@ namespace PotatoPainter
                 }
                 foreach (var piece in locked)
                 {
-                    Remove(Available(__instance), piece);
-                    Remove(Enabled(__instance), piece);
-                    if (ByCategory(__instance) is IEnumerable lists) foreach (var list in lists) Remove(list, piece);
+                    __instance.m_availablePieces.Remove(piece);
+                    __instance.m_enabledPieces.Remove(piece);
+                    var lists = ByCategory(__instance);
+                    if (lists != null) foreach (var list in lists) list?.Remove(piece);
                 }
                 // Test-only (0.4.0): which symbols are open, logged when it changes. Take out before release.
                 var line = $"Symbols unlocked by bosses: {open.Count} ({string.Join(", ", open)}); {locked.Count / 2} still locked.";
                 if (line != lastLogged) { lastLogged = line; Plugin.Log.LogInfo(line); }
-            }
-
-            private static void Remove(object collection, Piece piece)
-            {
-                if (collection == null) return;
-                var m = collection.GetType().GetMethod("Remove", new[] { typeof(Piece) });
-                if (m != null) m.Invoke(collection, new object[] { piece });
             }
         }
     }

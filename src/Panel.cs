@@ -23,6 +23,8 @@ namespace PotatoPainter
         private const string SaveKey = "PotatoPainter.Panel";
 
         internal static float PaintH, PaintS, PaintV, EtchH, EtchS, Glow, Size;
+        // An etched rune's own light (RuneLight), on by default (the user, 2026-10-31).
+        internal static bool Light = true;
         // Goes up on every change, so the placement preview redraws.
         internal static int Version;
 
@@ -32,7 +34,7 @@ namespace PotatoPainter
         internal static void Defaults(bool painted, bool etched)
         {
             if (painted) Color.RGBToHSV(Look.RedOchre, out PaintH, out PaintS, out PaintV);
-            if (etched) { Color.RGBToHSV(Look.Ember, out EtchH, out EtchS, out _); Glow = 1f; }
+            if (etched) { Color.RGBToHSV(Look.Ember, out EtchH, out EtchS, out _); Glow = 1f; Light = true; }
             Size = Paint.DefaultSize;
             Version++;
         }
@@ -65,6 +67,7 @@ namespace PotatoPainter
                     case "es": EtchS = Mathf.Clamp01(v); break;
                     case "eg": Glow = Mathf.Clamp(v, GlowMin, GlowMax); break;
                     case "sz": Size = Mathf.Clamp(v, SizeMin, SizeMax); break;
+                    case "el": Light = v != 0f; break;
                 }
             }
             Version++;
@@ -74,7 +77,7 @@ namespace PotatoPainter
         {
             if (!player) return;
             string F(float v) => v.ToString("0.####", CultureInfo.InvariantCulture);
-            player.m_customData[SaveKey] = $"ph={F(PaintH)};ps={F(PaintS)};pv={F(PaintV)};eh={F(EtchH)};es={F(EtchS)};eg={F(Glow)};sz={F(Size)}";
+            player.m_customData[SaveKey] = $"ph={F(PaintH)};ps={F(PaintS)};pv={F(PaintV)};eh={F(EtchH)};es={F(EtchS)};eg={F(Glow)};sz={F(Size)};el={(Light ? 1 : 0)}";
             Version++;
         }
     }
@@ -89,6 +92,7 @@ namespace PotatoPainter
         private static TMP_Text title;
         private static readonly Row[] rows = new Row[4];
         private static Image swatch;
+        private static GameObject lightButton;
         private static bool syncing;
         private static bool? shown;   // the kind the sliders are laid out for (true = etched)
         private static Player loadedFor;
@@ -187,6 +191,14 @@ namespace PotatoPainter
             rows[2].Value.text = etched ? "x" + third.ToString("0.00", CultureInfo.InvariantCulture) : Mathf.RoundToInt(third * 100f).ToString(CultureInfo.InvariantCulture) + "%";
             rows[3].Value.text = Settings.Size.ToString("0.00", CultureInfo.InvariantCulture) + " m";
             swatch.color = etched ? Settings.GlowColor : Settings.PaintColor;
+            if (lightButton)
+            {
+                lightButton.SetActive(etched);
+                string label = "Light: " + (Settings.Light ? "On" : "Off");
+                var tmp = lightButton.GetComponentInChildren<TMP_Text>(true);
+                if (tmp) tmp.text = label;
+                else { var legacy = lightButton.GetComponentInChildren<Text>(true); if (legacy) legacy.text = label; }
+            }
             // Each strip shows what moving its slider does: every hue, then grey to full colour, then dark to light (painted)
             // or the glow from faint to strong, drawn at a quarter so the strip stays readable.
             Paint(rows[0], x => Color.HSVToRGB(x, 1f, 1f));
@@ -200,6 +212,14 @@ namespace PotatoPainter
             if (!row.Strip) return;
             for (int x = 0; x < StripWidth; x++) row.Strip.SetPixel(x, 0, at(x / (StripWidth - 1f)));
             row.Strip.Apply(false);
+        }
+
+        private static void ToggleLight()
+        {
+            if (shown != true) return;
+            Settings.Light = !Settings.Light;
+            Settings.Save(Player.m_localPlayer);
+            Refresh();
         }
 
         private static void Reset()
@@ -288,6 +308,11 @@ namespace PotatoPainter
             reset.name = "PotatoPainter_Default";
             Place((RectTransform)reset.transform, width - pad - 130f, y + 6f, 130f, 36f);
             reset.GetComponent<Button>().onClick.AddListener(Reset);
+            // Etched only: the rune's own light, on or off (RuneLight).
+            lightButton = GUIManager.Instance.CreateButton("Light: On", rect, new Vector2(0f, 1f), new Vector2(0f, 1f), Vector2.zero, 130f, 36f);
+            lightButton.name = "PotatoPainter_Light";
+            Place((RectTransform)lightButton.transform, pad + 44f, y + 6f, 130f, 36f);
+            lightButton.GetComponent<Button>().onClick.AddListener(ToggleLight);
             panel.SetActive(false);
             // Test data (0.2.1: panel not seen): where it was put. Taken out before release.
             string Path(Transform t) { var parts = new List<string>(); for (; t; t = t.parent) parts.Insert(0, t.name); return string.Join("/", parts); }

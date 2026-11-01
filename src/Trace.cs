@@ -28,6 +28,8 @@ namespace PotatoPainter
         internal Transform CenterHost;
         internal readonly HashSet<int> Hosts = new HashSet<int>();
         internal int Sheets;
+        internal readonly List<Renderer> Strokes = new List<Renderer>(), Halos = new List<Renderer>();   // every detail level's
+        internal GameObject Light;                                // an etched paint's rune light (RuneLight), or null
         internal bool OnGround;                                   // some of it lies on the ground (Grass.cs)
 
         internal void Clear()
@@ -44,7 +46,7 @@ namespace PotatoPainter
             foreach (var b in Benders) Bend.All.Remove(b);
             foreach (var g in GroundSheets) Ground.Remove(g);
             GroundSheets.Clear();
-            Objects.Clear(); Registered.Clear(); Benders.Clear(); Hosts.Clear(); Sheets = 0; CenterHost = null; OnGround = false;
+            Objects.Clear(); Registered.Clear(); Benders.Clear(); Hosts.Clear(); Strokes.Clear(); Halos.Clear(); Light = null; Sheets = 0; CenterHost = null; OnGround = false;
         }
     }
 
@@ -237,7 +239,7 @@ namespace PotatoPainter
                     r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
                     r.receiveShadows = true;
                     Look.Colour(r, col, glow);
-                    built.Objects.Add(go); built.Sheets++;
+                    built.Objects.Add(go); built.Strokes.Add(r); built.Sheets++;
                     MeshRenderer hr = null;
                     if (halo)
                     {
@@ -250,7 +252,7 @@ namespace PotatoPainter
                         hr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
                         hr.receiveShadows = false;
                         Look.HaloColour(hr, glow);
-                        built.Objects.Add(hg);
+                        built.Objects.Add(hg); built.Halos.Add(hr);
                     }
                     var groundHm = hosts[k].Root.GetComponent<Heightmap>();
                     if (groundHm)
