@@ -26,6 +26,7 @@ namespace PotatoPainter
         // The placement ghost's latest aim, read by OnPlaced on the same client right after the game places the piece.
         private static Frame aim; private static bool aimValid; private static float aimTime; private static int aimLayer;
         private static readonly HashSet<string> logged = new HashSet<string>();
+        private static float previewCost;   // seconds the last preview trace took
         private static Rune aimRune; private static bool aimEtched; private static float aimSize = DefaultSize; private static Color aimCol, aimGlow;
 
         // Same rune on the same spot (centres closer than this share of its size, facing the same way): a repeat. Repeats
@@ -195,7 +196,9 @@ namespace PotatoPainter
             // Retraced when the aim moves (at most ten times a second), and twice a second when it doesn't, so new paint
             // nearby (layers) and pieces that load show up in the preview too.
             bool moved = (eye - lastEye).sqrMagnitude >= 1e-4f || Vector3.Angle(dir, lastDir) > 0.05f || turn != lastTurn || Settings.Version != lastSettings;
-            if (Time.time - previewTime < (moved ? 0.1f : 0.5f)) return;
+            // A slow trace (a large paint on detailed surfaces) waits at least four times as long as it took before the next one
+            // (0.4.2), so the preview can't eat most of the frames.
+            if (Time.time - previewTime < Mathf.Max(moved ? 0.1f : 0.5f, previewCost * 4f)) return;
             lastEye = eye; lastDir = dir; lastTurn = turn; lastSettings = Settings.Version; previewTime = Time.time;
             // The panel's settings for this kind (kept until changed).
             float size = Settings.Size; var col = Settings.Colour(Etched); var glow = Settings.GlowFor(Etched);
@@ -217,6 +220,7 @@ namespace PotatoPainter
             aimLayer = LayerAt(aim.Center, size, null);
             var sw = Perf.Start();
             preview = Trace.Build(aim, size, 0.004f + 0.002f * aimLayer, Look.Material(Rune, Etched), Etched ? Look.HaloFor(Rune) : null, col, glow, true, "preview");
+            previewCost = (float)sw.Elapsed.TotalSeconds;
             Perf.Stop("preview trace size " + size.ToString("0.0"), sw, preview.Sheets);
             if (!moved && !ghostGrassAt.HasValue && preview.OnGround) { Grass.Set(this, true, aim, size); ghostGrassAt = aim.Center; }
         }

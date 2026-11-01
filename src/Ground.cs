@@ -37,6 +37,9 @@ namespace PotatoPainter
             internal readonly List<Corner3> Tris = new List<Corner3>();
             internal Vector3[] Buf;
             internal Vector3 LastCam = Vector3.positiveInfinity; internal bool LastTess; internal int LastFrame = -1;
+            // What the drawn ground's shape depended on at the last refresh (0.4.2): the tessellation factor of every corner,
+            // _Tess and _WaterLevel, and whether the whole sheet was within 100 m (no far offset).
+            internal float[] LastFactors; internal float LastTessAmount = -1f, LastWater = float.NaN; internal bool LastNear; internal uint LastMask = uint.MaxValue;
         }
 
         internal struct Corner3 { internal Vector3 P0, P1, P2; internal Color C0, C1, C2; internal Vector2 UV0, UV1, UV2; }
@@ -105,19 +108,34 @@ namespace PotatoPainter
             var mat = MaterialInstance(s.Hm);
             float tessAmount = mat && mat.HasProperty("_Tess") ? mat.GetFloat("_Tess") : 4f;
             float water = mat && mat.HasProperty("_WaterLevel") ? mat.GetFloat("_WaterLevel") : 30f;
+
+            // Skip when the drawn ground can't have changed (0.4.2; the 0.4.1 timing log: up to 54 ms a frame for 14 ground
+            // paints while walking). The camera only enters the shape through the tessellation factors (constant 1 within
+            // 10 m of every corner) and the far offset (zero while every corner is within 100 m, the interior then too).
+            var factors = new float[s.Tris.Count * 3]; bool near = true;
+            for (int t = 0; t < s.Tris.Count; t++)
+            {
+                var c = s.Tris[t];
+                factors[3 * t] = Factor(c.P0, camPos); factors[3 * t + 1] = Factor(c.P1, camPos); factors[3 * t + 2] = Factor(c.P2, camPos);
+                if (Flat(c.P0, camPos) >= 100f || Flat(c.P1, camPos) >= 100f || Flat(c.P2, camPos) >= 100f) near = false;
+            }
+            // The ground's paint mask (dirt, cultivation, paving) changes the shape too: its update count, bumped on each Apply.
+            var maskNow = PaintMask(s.Hm); uint maskCount = maskNow ? maskNow.updateCount : 0u;
+            if (!force && near && s.LastNear && tessAmount == s.LastTessAmount && water == s.LastWater && maskCount == s.LastMask && Same(factors, s.LastFactors)) return;
+            s.LastFactors = factors; s.LastNear = near; s.LastTessAmount = tessAmount; s.LastWater = water; s.LastMask = maskCount;
             var mask = PaintMask(s.Hm);
             var hmLocal = s.Hm.transform.worldToLocalMatrix;
             var toSpace = s.Space ? s.Space.worldToLocalMatrix : Matrix4x4.identity;
             var upInSpace = toSpace.MultiplyVector(Vector3.up);   // the shader adds its offset along the heightmap's local y
 
             // Per ground triangle: the drawn points and their offsets.
-            var perTri = new (float[] u, float[] v, float[] dy, int[] idx, int nIdx)[s.Tris.Count];
+            var perTri = new (float[] u, float[] v, float[] dy, int[] idx, int nIdx, List<int>[] bins)[s.Tris.Count];
             for (int t = 0; t < s.Tris.Count; t++)
             {
                 var c = s.Tris[t];
                 if (tessOn)
                 {
-                    float f0 = Factor(c.P0, camPos), f1 = Factor(c.P1, camPos), f2 = Factor(c.P2, camPos);
+                    float f0 = factors[3 * t], f1 = factors[3 * t + 1], f2 = factors[3 * t + 2];
                     float t0 = f0 * tessAmount, t1 = f1 * tessAmount, t2 = f2 * tessAmount;
                     tess.TessellateTri((t1 + t2) * 0.5f, (t0 + t2) * 0.5f, (t0 + t1) * 0.5f, (t0 + t1 + t2) * 0.333333f);
                 }
@@ -135,13 +153,13 @@ namespace PotatoPainter
                 }
                 var idx = new int[tess.NumIndices];
                 System.Array.Copy(tess.Index, idx, tess.NumIndices);
-                perTri[t] = (u, v, dy, idx, tess.NumIndices);
+                perTri[t] = (u, v, dy, idx, tess.NumIndices, Bins(u, v, idx, tess.NumIndices));
             }
 
             for (int k = 0; k < s.Verts.Length; k++)
             {
                 var d = perTri[s.Tri[k]];
-                float off = Interpolate(d.u, d.v, d.dy, d.idx, d.nIdx, s.Domain[k]);
+                float off = Interpolate(d.u, d.v, d.dy, d.idx, d.nIdx, d.bins, s.Domain[k]);
                 s.Buf[s.Verts[k]] = s.Base[k] + upInSpace * off + s.Normal[k] * s.Lift;
             }
             s.Mesh.vertices = s.Buf;
@@ -192,6 +210,53 @@ namespace PotatoPainter
             far = far * far * (3f - 2f * far);
             dy += localY + dy > water ? far : -far;
             return dy;
+        }
+
+        private static float Flat(Vector3 p, Vector3 cam) => new Vector2(p.x - cam.x, p.z - cam.z).magnitude;
+
+        private static bool Same(float[] a, float[] b)
+        {
+            if (b == null || a.Length != b.Length) return false;
+            for (int i = 0; i < a.Length; i++) if (a[i] != b[i]) return false;
+            return true;
+        }
+
+        // The drawn triangles of one ground triangle binned by their box in (u, v) on an 8 x 8 grid (0.4.2), so a point
+        // only tests the triangles whose box holds it, in their original order.
+        private const int BinN = 8;
+        private static List<int>[] Bins(float[] u, float[] v, int[] idx, int n)
+        {
+            var bins = new List<int>[BinN * BinN];
+            for (int t = 0; t + 2 < n; t += 3)
+            {
+                int a = idx[t], b = idx[t + 1], c = idx[t + 2];
+                float lu = Mathf.Min(u[a], Mathf.Min(u[b], u[c])) - 1e-5f, hu = Mathf.Max(u[a], Mathf.Max(u[b], u[c])) + 1e-5f;
+                float lv = Mathf.Min(v[a], Mathf.Min(v[b], v[c])) - 1e-5f, hv = Mathf.Max(v[a], Mathf.Max(v[b], v[c])) + 1e-5f;
+                int x0 = Mathf.Clamp((int)(lu * BinN), 0, BinN - 1), x1 = Mathf.Clamp((int)(hu * BinN), 0, BinN - 1);
+                int y0 = Mathf.Clamp((int)(lv * BinN), 0, BinN - 1), y1 = Mathf.Clamp((int)(hv * BinN), 0, BinN - 1);
+                for (int y = y0; y <= y1; y++) for (int x = x0; x <= x1; x++) (bins[y * BinN + x] ?? (bins[y * BinN + x] = new List<int>())).Add(t);
+            }
+            return bins;
+        }
+
+        // First the point's bin: the first drawn triangle there that holds it is the first one overall (any triangle holding
+        // the point has its box over that bin). When none in the bin holds it, the full search below, as before.
+        private static float Interpolate(float[] u, float[] v, float[] dy, int[] idx, int n, List<int>[] bins, Vector2 p)
+        {
+            int bx = (int)Mathf.Floor(p.x * BinN), by = (int)Mathf.Floor(p.y * BinN);
+            if (bx >= 0 && by >= 0 && bx < BinN && by < BinN && bins[by * BinN + bx] is List<int> list)
+                foreach (int t in list)
+                {
+                    int a = idx[t], b = idx[t + 1], c = idx[t + 2];
+                    float x1 = u[a], y1 = v[a], x2 = u[b], y2 = v[b], x3 = u[c], y3 = v[c];
+                    float den = (y2 - y3) * (x1 - x3) + (x3 - x2) * (y1 - y3);
+                    if (Mathf.Abs(den) < 1e-12f) continue;
+                    float l1 = ((y2 - y3) * (p.x - x3) + (x3 - x2) * (p.y - y3)) / den;
+                    float l2 = ((y3 - y1) * (p.x - x3) + (x1 - x3) * (p.y - y3)) / den;
+                    float l3 = 1f - l1 - l2;
+                    if (Mathf.Min(l1, Mathf.Min(l2, l3)) >= 0f) return l1 * dy[a] + l2 * dy[b] + l3 * dy[c];
+                }
+            return Interpolate(u, v, dy, idx, n, p);
         }
 
         // The offset at (u, v) inside the drawn triangles: the triangle containing it, linearly.

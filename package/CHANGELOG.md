@@ -1,3 +1,8 @@
+## 0.4.2 (test build, not released)
+- Large paints no longer drag the frame rate down: tracing a paint onto surfaces is much faster, and paint on the ground is only reshaped when the ground's drawn shape can have changed (not on every step you take near it).
+- A slow preview waits a little longer before tracing again, so it can't take over the frame.
+- Still writes the timing lines to the log, to compare with 0.4.1.
+
 ## 0.4.1 (test build, not released)
 - Test build: writes how long painting takes to the log every 5 seconds, to find the lag with large paints.
 

@@ -130,6 +130,17 @@ namespace PotatoPainter
                     uvs[i] = new Vector2(u, v);
                 }
 
+            // One cast index per surface list, made the first time a list is cast against (0.4.2).
+            var queries = new[] { starts[0], starts[grid], starts[count - 1 - grid], starts[count - 1], f.Center + n * reach };
+            int cells = Mathf.Clamp(grid / 2, 8, 48);
+            var indexes = new Dictionary<List<Surface>, CastIndex>();
+            CastIndex Ix(List<Surface> list)
+            {
+                if (list == null || list.Count == 0) return null;
+                if (!indexes.TryGetValue(list, out var ix)) indexes[list] = ix = CastIndex.Make(list, n, side, queries, cells);
+                return ix;
+            }
+
             // Which host owns each point: the one whose close-up surface is on top there.
             var owner = new int[count]; for (int i = 0; i < count; i++) owner[i] = -1;
             var nearRef = hosts.Select(h => Near(h.Reference, f.Center, radius)).ToList();
@@ -137,7 +148,7 @@ namespace PotatoPainter
             {
                 float best = float.MaxValue;
                 for (int k = 0; k < hosts.Count; k++)
-                    if (Cast(nearRef[k], starts[i], -n, reach * 2f, plane, out var at, out _, out _, out _, out _))
+                    if (Cast(Ix(nearRef[k]), nearRef[k], starts[i], -n, reach * 2f, plane, out var at, out _, out _, out _, out _))
                     {
                         float d = Vector3.Distance(starts[i], at);
                         if (d < best) { best = d; owner[i] = k; }
@@ -147,7 +158,7 @@ namespace PotatoPainter
             {
                 float best = float.MaxValue;
                 for (int k = 0; k < hosts.Count; k++)
-                    if (Cast(nearRef[k], f.Center + n * reach, -n, reach * 2f, plane, out var at, out _, out _, out _, out _))
+                    if (Cast(Ix(nearRef[k]), nearRef[k], f.Center + n * reach, -n, reach * 2f, plane, out var at, out _, out _, out _, out _))
                     {
                         float d = Vector3.Distance(f.Center + n * reach, at);
                         if (d < best) { best = d; built.CenterHost = hosts[k].Root; }
@@ -176,13 +187,13 @@ namespace PotatoPainter
                     var corners = new int[count * 3]; var bary = new Vector3[count]; var hitR = new Renderer[count];
                     // The surface material where the centre lands on this model: trees bend in the wind.
                     Material hostMat = null; Renderer hostR = null;
-                    if (Cast(surfaces, f.Center + n * reach, -n, reach * 2f, plane, out _, out _, out var cs, out var ct, out _) && cs.R && cs.TriMat != null) { hostMat = cs.TriMat[ct]; hostR = cs.R; }
+                    if (Cast(Ix(surfaces), surfaces, f.Center + n * reach, -n, reach * 2f, plane, out _, out _, out var cs, out var ct, out _) && cs.R && cs.TriMat != null) { hostMat = cs.TriMat[ct]; hostR = cs.R; }
                     for (int i = 0; i < count; i++)
                     {
                         if (owner[i] < 0) continue;
                         // A corner on another piece (a seam) is traced on that piece, at the same detail level.
                         var on = owner[i] == k ? surfaces : Other(owner[i], lv);
-                        if (Cast(on, starts[i], -n, reach * 2f, plane, out var at, out var nn, out var hs, out var ht, out var u2))
+                        if (Cast(Ix(on), on, starts[i], -n, reach * 2f, plane, out var at, out var nn, out var hs, out var ht, out var u2))
                         {
                             verts[i] = at + nn * lift; normals[i] = nn; uv2s[i] = u2; ok[i] = true;
                             hitR[i] = hs.R;
@@ -617,6 +628,102 @@ namespace PotatoPainter
 
         // The ray's hit on these surfaces: which surface and triangle, and the hit's UV2 (interpolated) when the surface has
         // one. With a plane (trees): of all hits, the one nearest the plane within its band. Otherwise the first hit.
+        // Speeds up the casts of one paint (0.4.2; the 0.4.1 timing log: a 2 m paint's 4,624 casts each tested every triangle
+        // near it, 40-210 ms a trace). Every cast of a paint runs straight down its normal, so a ray can only hit a triangle
+        // whose outline seen along the normal contains the ray's start: the triangles are binned by that outline's box on a
+        // grid across the paint, and a cast tests only its cell's triangles, in their original order (same result).
+        private sealed class CastIndex
+        {
+            internal List<Surface> Surfaces; internal Vector3 B1, B2; internal float MinU, MinV, Cell; internal int N;
+            internal List<int>[] Cells;   // per cell: surface index, triangle start index (pairs)
+
+            internal static CastIndex Make(List<Surface> surfaces, Vector3 normal, Vector3 side, Vector3[] queryPoints, int n)
+            {
+                var nn = normal.normalized;
+                var b1 = Vector3.ProjectOnPlane(side, nn); if (b1.sqrMagnitude < 1e-8f) b1 = Vector3.ProjectOnPlane(Vector3.right, nn);
+                if (b1.sqrMagnitude < 1e-8f) b1 = Vector3.ProjectOnPlane(Vector3.forward, nn);
+                b1.Normalize(); var b2 = Vector3.Cross(nn, b1).normalized;
+                float minU = float.MaxValue, minV = float.MaxValue, maxU = float.MinValue, maxV = float.MinValue;
+                foreach (var q in queryPoints) { float u = Vector3.Dot(q, b1), v = Vector3.Dot(q, b2); minU = Mathf.Min(minU, u); maxU = Mathf.Max(maxU, u); minV = Mathf.Min(minV, v); maxV = Mathf.Max(maxV, v); }
+                const float pad = 0.01f;
+                minU -= pad; minV -= pad; maxU += pad; maxV += pad;
+                float cell = Mathf.Max(maxU - minU, maxV - minV) / n;
+                if (cell <= 0f) return null;
+                var ix = new CastIndex { Surfaces = surfaces, B1 = b1, B2 = b2, MinU = minU, MinV = minV, Cell = cell, N = n, Cells = new List<int>[n * n] };
+                const float eps = 1e-3f;
+                for (int si = 0; si < surfaces.Count; si++)
+                {
+                    var sv = surfaces[si].V; var st = surfaces[si].T;
+                    for (int i = 0; i + 2 < st.Length; i += 3)
+                    {
+                        Vector3 a = sv[st[i]], b = sv[st[i + 1]], c = sv[st[i + 2]];
+                        float ua = Vector3.Dot(a, b1), ub = Vector3.Dot(b, b1), uc = Vector3.Dot(c, b1);
+                        float va = Vector3.Dot(a, b2), vb = Vector3.Dot(b, b2), vc = Vector3.Dot(c, b2);
+                        float lu = Mathf.Min(ua, Mathf.Min(ub, uc)) - eps, hu = Mathf.Max(ua, Mathf.Max(ub, uc)) + eps;
+                        float lv = Mathf.Min(va, Mathf.Min(vb, vc)) - eps, hv = Mathf.Max(va, Mathf.Max(vb, vc)) + eps;
+                        if (hu < minU || hv < minV || lu > minU + cell * n || lv > minV + cell * n) continue;
+                        int x0 = Mathf.Clamp((int)((lu - minU) / cell), 0, n - 1), x1 = Mathf.Clamp((int)((hu - minU) / cell), 0, n - 1);
+                        int y0 = Mathf.Clamp((int)((lv - minV) / cell), 0, n - 1), y1 = Mathf.Clamp((int)((hv - minV) / cell), 0, n - 1);
+                        for (int y = y0; y <= y1; y++)
+                            for (int x = x0; x <= x1; x++)
+                            {
+                                var list = ix.Cells[y * n + x] ?? (ix.Cells[y * n + x] = new List<int>());
+                                list.Add(si); list.Add(i);
+                            }
+                    }
+                }
+                return ix;
+            }
+
+            // The cell's triangles in the order Cast would test them, or null when the point is outside the grid.
+            internal List<int> At(Vector3 from, out bool outside)
+            {
+                float u = Vector3.Dot(from, B1), v = Vector3.Dot(from, B2);
+                int x = (int)Mathf.Floor((u - MinU) / Cell), y = (int)Mathf.Floor((v - MinV) / Cell);
+                outside = x < 0 || y < 0 || x >= N || y >= N;
+                return outside ? null : Cells[y * N + x];
+            }
+        }
+
+        // Cast through an index when there is one (and the start is inside its grid), otherwise against every triangle.
+        private static bool Cast(CastIndex ix, List<Surface> surfaces, Vector3 from, Vector3 dir, float max, Plane plane, out Vector3 point, out Vector3 normal, out Surface hitSurface, out int hitTri, out Vector2 hitUV2)
+        {
+            if (ix == null) return Cast(surfaces, from, dir, max, plane, out point, out normal, out hitSurface, out hitTri, out hitUV2);
+            var cell = ix.At(from, out bool outside);
+            if (outside) return Cast(surfaces, from, dir, max, plane, out point, out normal, out hitSurface, out hitTri, out hitUV2);
+            point = normal = Vector3.zero; float best = max; hitSurface = null; hitTri = -1; hitUV2 = Vector2.zero;
+            if (cell == null) return false;
+            float bestScore = float.MaxValue;
+            for (int k = 0; k + 1 < cell.Count; k += 2)
+            {
+                var s = ix.Surfaces[cell[k]]; int i = cell[k + 1];
+                var v = s.V; var t = s.T;
+                Vector3 a = v[t[i]], b = v[t[i + 1]], c = v[t[i + 2]];
+                Vector3 e1 = b - a, e2 = c - a, p = Vector3.Cross(dir, e2);
+                float det = Vector3.Dot(e1, p);
+                if (Mathf.Abs(det) < 1e-8f) continue;
+                float inv = 1f / det; Vector3 o = from - a;
+                float u = Vector3.Dot(o, p) * inv; if (u < 0f || u > 1f) continue;
+                Vector3 q = Vector3.Cross(o, e1);
+                float w = Vector3.Dot(dir, q) * inv; if (w < 0f || u + w > 1f) continue;
+                float d = Vector3.Dot(e2, q) * inv;
+                if (plane.On)
+                {
+                    if (d <= 0f || d >= max) continue;
+                    float score = Mathf.Abs(Vector3.Dot(from + dir * d - plane.Point, plane.Normal));
+                    if (score > plane.Band || score >= bestScore) continue;
+                    bestScore = score; best = d;
+                }
+                else { if (d <= 0f || d >= best) continue; best = d; }
+                point = from + dir * d;
+                hitSurface = s; hitTri = i / 3;
+                if (s.UV2 != null) hitUV2 = s.UV2[t[i]] * (1f - u - w) + s.UV2[t[i + 1]] * u + s.UV2[t[i + 2]] * w;
+                normal = Vector3.Cross(e1, e2).normalized;
+                if (Vector3.Dot(normal, dir) > 0f) normal = -normal;
+            }
+            return hitSurface != null;
+        }
+
         private static bool Cast(List<Surface> surfaces, Vector3 from, Vector3 dir, float max, Plane plane, out Vector3 point, out Vector3 normal, out Surface hitSurface, out int hitTri, out Vector2 hitUV2)
         {
             point = normal = Vector3.zero; float best = max; hitSurface = null; hitTri = -1; hitUV2 = Vector2.zero;
