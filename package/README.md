@@ -39,6 +39,8 @@ Paint runes and Norse symbols onto your walls, floors, rocks, trees and the grou
 
 ![Hand prints on two trees](https://raw.githubusercontent.com/TheRealRel/PotatoPainter/main/docs/images/trees.jpg)
 
+![Etched symbols glowing on the ground at night](https://raw.githubusercontent.com/TheRealRel/PotatoPainter/main/docs/images/ground.jpg)
+
 - **Layers:** a new rune over an old one goes on top, so you can stack colours and sizes. The same rune in the same colour and size on the same spot is refused.
 - **Taking it away:** middle mouse with the Rúnakefli takes the topmost rune you aim at and gives its Coal and Resin back. Wards and no-build areas count, as they do for the hammer.
 - If the piece, rock or tree under a rune is broken, cut or removed, the rune goes with it.

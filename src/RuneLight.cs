@@ -31,17 +31,19 @@ namespace PotatoPainter
         }
 
         // Darker colours get a stronger light (1.0.0; the user, 2026-11-01: blue and red runes seemed to have no glow at full
-        // strength, "Let's try and compensate for this"). At the same strength the eye sees full blue as about a tenth as
-        // bright as green and full red as about a third (luminance 0.2126 R + 0.7152 G + 0.0722 B, in the game's linear
-        // colour space, as Unity lights use their colour). A light whose colour is darker than pure green's is raised
-        // toward green's brightness, at most 4x (full blue would need about 10x; red 3.4x, ember 2.8x, violet 6x, magenta
-        // 2.5x, orange 2x); yellow, green, cyan and the pale colours keep their light as it was.
-        internal const float MaxBoost = 4f;
-        private static readonly float GreenLuma = Luma(Color.green);
+        // strength, "Let's try and compensate for this"). First try: raised to pure green's luminance (0.2126 R + 0.7152 G +
+        // 0.0722 B), at most 4x. The user's night video (20-19-30): "too much": the violet and magenta lights (4x, 2.5x)
+        // lit the ground about five times as bright as the cyan runes' (1x), washing whole rocks purple even by day, while
+        // red at 3.4x lit about as much as cyan at night. Saturated blue and violet look brighter on screen than their
+        // luminance says, so the weights are dialled from that video: blue's raised until violet needs 1.25x and red's
+        // until red needs 2.2x (in the game's linear colour space, as Unity lights use their colour). Boosts at full
+        // saturation: red 2.2x, ember 1.95x, orange 1.5x, blue 1.4x, violet 1.25x; magenta, yellow, green, cyan and the
+        // paler colours keep their light as it was. At most 2.5x.
+        internal const float MaxBoost = 2.5f, WeightR = 0.325f, WeightG = 0.7152f, WeightB = 0.503f;
 
-        private static float Luma(Color c) { var l = c.linear; return 0.2126f * l.r + 0.7152f * l.g + 0.0722f * l.b; }
+        private static float Brightness(Color c) { var l = c.linear; return WeightR * l.r + WeightG * l.g + WeightB * l.b; }
 
-        internal static float Boost(Color hue) => Mathf.Clamp(GreenLuma / Mathf.Max(Luma(hue), 1e-4f), 1f, MaxBoost);
+        internal static float Boost(Color hue) => Mathf.Clamp(WeightG / Mathf.Max(Brightness(hue), 1e-4f), 1f, MaxBoost);
 
         internal static float Intensity(Color glow) => IntensityPerGlow * glow.maxColorComponent * Boost(Hue(glow));
 
