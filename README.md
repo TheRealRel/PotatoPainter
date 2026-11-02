@@ -1,6 +1,6 @@
 Paint runes and Norse symbols onto your walls, floors, rocks, trees and the ground with the Rúnakefli, a carved rune stick. The paint lies right on the surface, takes the world's light, follows the ground and bends with the bark when the wind moves a tree. Etched runes glow and light up what's around them.
 
-![An etched Vegvísir glowing on a stone wall](https://raw.githubusercontent.com/TheRealRel/PotatoPainter/main/docs/images/runes-wall.jpg)
+![A painted symbol and an etched Vegvísir on a stone wall](https://raw.githubusercontent.com/TheRealRel/PotatoPainter/main/docs/images/runes-wall.jpg)
 
 ![](https://raw.githubusercontent.com/TheRealRel/PotatoPainter/main/docs/images/icon-kefli.png)
 
