@@ -30,7 +30,20 @@ namespace PotatoPainter
             return c;
         }
 
-        internal static float Intensity(Color glow) => IntensityPerGlow * glow.maxColorComponent;
+        // Darker colours get a stronger light (1.0.0; the user, 2026-11-01: blue and red runes seemed to have no glow at full
+        // strength, "Let's try and compensate for this"). At the same strength the eye sees full blue as about a tenth as
+        // bright as green and full red as about a third (luminance 0.2126 R + 0.7152 G + 0.0722 B, in the game's linear
+        // colour space, as Unity lights use their colour). A light whose colour is darker than pure green's is raised
+        // toward green's brightness, at most 4x (full blue would need about 10x; red 3.4x, ember 2.8x, violet 6x, magenta
+        // 2.5x, orange 2x); yellow, green, cyan and the pale colours keep their light as it was.
+        internal const float MaxBoost = 4f;
+        private static readonly float GreenLuma = Luma(Color.green);
+
+        private static float Luma(Color c) { var l = c.linear; return 0.2126f * l.r + 0.7152f * l.g + 0.0722f * l.b; }
+
+        internal static float Boost(Color hue) => Mathf.Clamp(GreenLuma / Mathf.Max(Luma(hue), 1e-4f), 1f, MaxBoost);
+
+        internal static float Intensity(Color glow) => IntensityPerGlow * glow.maxColorComponent * Boost(Hue(glow));
 
         // A placed paint's light, with the game's LightLod (added while inactive, as the probe did, so LightLod starts with
         // the light set up).
