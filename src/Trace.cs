@@ -77,27 +77,14 @@ namespace PotatoPainter
 
         // ------------------------------------------------------------------ aiming
         // Where a paint of this size would go along the ray, as the game draws the surfaces there.
-        // Test data (0.2.2: "some trees aren't registering"): why the aim found nothing, and what was hit. Taken out before
-        // release.
-        internal static string Why; internal static Collider WhyHit;
-        // Test data (0.4.11): for an aim that hit a collider but none of the drawn surfaces, where the ray was and how near it
-        // came to a drawn triangle. Taken out before release.
-        internal static string WhyDetail;
-
         internal static bool Aim(Vector3 eye, Vector3 dir, float max, float size, Vector3 cameraRight, float turn, out Frame frame)
         {
-            frame = default; Why = null; WhyHit = null; WhyDetail = null;
-            if (!Physics.Raycast(eye, dir, out var hit, max, Mask, QueryTriggerInteraction.Ignore)) { Why = "the aim ray hit nothing"; return false; }
-            WhyHit = hit.collider;
+            frame = default;
+            if (!Physics.Raycast(eye, dir, out var hit, max, Mask, QueryTriggerInteraction.Ignore)) return false;
             var hosts = Hosts(hit.point, size, hit.collider);
-            if (hosts.Count == 0) { Why = "nothing readable on what the aim ray hit"; return false; }
+            if (hosts.Count == 0) return false;
             var reference = hosts.SelectMany(h => h.Reference).ToList();
-            if (!Cast(reference, eye, dir, hit.distance + 1.5f, default, out var center, out var n, out var aimed, out var aimedTri, out _))
-            {
-                Why = $"none of the drawn surfaces of {string.Join(", ", hosts.Select(h => h.Root.name))} lies on the aim ray ({reference.Count} surfaces read)";
-                WhyDetail = NearMiss(reference, eye, dir, hit, hit.distance + 1.5f);
-                return false;
-            }
+            if (!Cast(reference, eye, dir, hit.distance + 1.5f, default, out var center, out var n, out var aimed, out var aimedTri, out _)) return false;
             var mat = aimed.TriMat != null ? aimed.TriMat[aimedTri] : null;
             frame.Center = center; frame.Normal = n;
             frame.Tree = mat && mat.shader && mat.shader.name == "Custom/Vegetation";
@@ -112,35 +99,6 @@ namespace PotatoPainter
             // rotation in degrees; seen from the front, clockwise as a piece turns seen from above).
             if (turn != 0f) frame.Up = Quaternion.AngleAxis(turn, n) * frame.Up;
             return true;
-        }
-
-        // Test data (0.4.11): of the drawn triangles whose plane the ray crosses within reach, the one it misses by the least
-        // (how far outside it the crossing lies, in its barycentric terms and in metres), and where the collider was hit.
-        private static string NearMiss(List<Surface> surfaces, Vector3 eye, Vector3 dir, RaycastHit hit, float max)
-        {
-            int crossed = 0, tris = 0; float best = float.MaxValue, bestT = 0f, bestM = 0f, bestEdge = 0f; string bestName = "";
-            foreach (var s in surfaces)
-                for (int i = 0; i + 2 < s.T.Length; i += 3)
-                {
-                    tris++;
-                    Vector3 a = s.V[s.T[i]], b = s.V[s.T[i + 1]], c = s.V[s.T[i + 2]];
-                    Vector3 nrm = Vector3.Cross(b - a, c - a);
-                    float den = Vector3.Dot(nrm, dir);
-                    if (Mathf.Abs(den) < 1e-12f) continue;
-                    float t = Vector3.Dot(nrm, a - eye) / den;
-                    if (t <= 0f || t >= max) continue;
-                    crossed++;
-                    var p = eye + dir * t;
-                    var bc = Barycentric(p, a, b, c);
-                    float outside = Mathf.Max(-bc.x, Mathf.Max(-bc.y, -bc.z));
-                    if (outside < best)
-                    {
-                        best = outside; bestT = t; bestEdge = Mathf.Max((b - a).magnitude, Mathf.Max((c - b).magnitude, (a - c).magnitude));
-                        bestM = Mathf.Min((Closest(p, a, b, c) - p).magnitude, 99f);
-                        bestName = s.R ? s.R.name : "?";
-                    }
-                }
-            return $"collider hit {hit.collider.name} at {hit.point} ({hit.distance:0.000} m along the ray, its normal {hit.normal}); eye {eye}, ray {dir}; {tris} drawn triangles, {crossed} with their plane crossed within {max:0.00} m; nearest miss {(best == float.MaxValue ? "none" : $"{best:0.000000} outside (barycentric), {bestM * 1000f:0.000} mm off, at {bestT:0.000} m, on {bestName}, triangle {bestEdge:0.000} m across")}";
         }
 
         // ------------------------------------------------------------------ building
@@ -159,7 +117,6 @@ namespace PotatoPainter
             internal bool Done;                 // nothing to compute (no hosts): Finish at once
             internal volatile bool Ready;       // Compute finished (on its thread)
             internal Exception Error;
-            internal double ComputeMs; internal int Casts;
             private List<Host> hosts; private List<Surface>[] nearRef;
             private readonly List<Sheet> sheets = new List<Sheet>();
 
@@ -205,7 +162,6 @@ namespace PotatoPainter
             // Any thread: the casts and the sheets' points and triangles. Reads only the arrays Prepare made.
             internal void Compute()
             {
-                var sw = System.Diagnostics.Stopwatch.StartNew();
                 var f = F; float size = Size, lift = Lift; bool preview = Preview;
                 var n = f.Normal; var up = f.Up; var side = Vector3.Cross(n, up);
                 var plane = f.Tree ? new Plane { On = true, Point = f.Center, Normal = n, Band = size * 0.35f + 0.05f } : default;
@@ -247,7 +203,6 @@ namespace PotatoPainter
                             if (d < best) { best = d; owner[i] = k; oAt[i] = at; oN[i] = an; oS[i] = hs0; oT[i] = ht0; oU[i] = hu0; }
                         }
                 }
-                int casts = count * hosts.Count;
                 // A host whose close-up surfaces are exactly one detail level (the usual case: one of new, worn or broken is
                 // shown): that level traced on Near(the same list) gives the same hits as the owner pass, point for point.
                 var reuse = hosts.Select(h =>
@@ -294,7 +249,6 @@ namespace PotatoPainter
                             {
                                 var on = owner[i] == k ? surfaces : Other(owner[i], lv);
                                 hit = Cast(Ix(on), on, starts[i], -n, reach * 2f, plane, out at, out nn, out hs, out ht, out u2);
-                                casts++;
                             }
                             if (hit)
                             {
@@ -320,7 +274,6 @@ namespace PotatoPainter
                         sheets.Add(new Sheet { K = k, Lv = lv, Verts = verts, Normals = normals, Bary = bary, Ok = ok, Uv2 = uv2s, Corners = corners, Tri = tri.ToArray(), Owner = owner, HostMat = hostMat, HostR = hostR, HostSurface = hostS, AllOnHostR = all });
                     }
                 }
-                Casts = casts; ComputeMs = sw.Elapsed.TotalMilliseconds;
             }
 
             // Game thread: the meshes, hung on the hosts (skipping any host or detail level destroyed since Prepare).
@@ -418,20 +371,12 @@ namespace PotatoPainter
             }
         }
 
-        // All three steps at once, on the game thread (the preview; timed for the Perf line).
+        // All three steps at once, on the game thread (the preview).
         internal static Built Build(Frame f, float size, float lift, Material material, Material halo, Color col, Color glow, bool preview, string name)
         {
-            string tk = preview ? "preview" : "paint";   // test-only timing keys (Perf)
-            var sw = Perf.Start();
             var j = Job.Prepare(f, size, lift, material, halo, col, glow, preview, name);
-            Perf.Stop(tk + " trace: read hosts", sw);
-            if (j.Done) return j.Finish();
-            j.Compute();
-            Perf.Add(tk + " trace: math", j.ComputeMs, j.Casts);
-            sw = Perf.Start();
-            var built = j.Finish();
-            Perf.Stop(tk + " trace: sheet build", sw, built.Sheets);
-            return built;
+            if (!j.Done) j.Compute();
+            return j.Finish();
         }
 
         // Compute on the thread pool. The job is Ready when it is done (Error set if it threw).
@@ -574,33 +519,6 @@ namespace PotatoPainter
             return null;
         }
 
-        // Test data: what an object is made of, as the tracer sees it.
-        internal static string Describe(Collider c)
-        {
-            if (!c) return "nothing";
-            var root = RootOf(c);
-            var sb = new System.Text.StringBuilder();
-            sb.Append($"hit {c.name} ({c.GetType().Name}, layer {LayerMask.LayerToName(c.gameObject.layer)}) on {root.name}");
-            foreach (var g in root.GetComponentsInChildren<LODGroup>(true))
-            {
-                var lods = g.GetLODs();
-                sb.Append($"; LODGroup {g.name} ({lods.Length} levels, active {g.gameObject.activeInHierarchy}, has snow {lods.SelectMany(l => l.renderers).Any(r => r && Snow(r))})");
-                for (int i = 0; i < lods.Length; i++)
-                    sb.Append($" L{i}: " + string.Join(", ", lods[i].renderers.Where(r => r).Select(R)));
-            }
-            var loose = root.GetComponentsInChildren<Renderer>(true).Where(r => !root.GetComponentsInChildren<LODGroup>(true).Any(g => g.GetLODs().SelectMany(l => l.renderers).Contains(r))).ToList();
-            if (loose.Count > 0) sb.Append("; outside LOD groups: " + string.Join(", ", loose.Select(R)));
-            sb.Append("; colliders: " + string.Join(", ", root.GetComponentsInChildren<Collider>(true).Select(x => $"{x.name} {x.GetType().Name} {LayerMask.LayerToName(x.gameObject.layer)}{(x.isTrigger ? " trigger" : "")}{(x is MeshCollider mc ? (mc.sharedMesh && mc.sharedMesh.isReadable ? " readable" : " not readable") : "")}")));
-            return sb.ToString();
-        }
-
-        private static string R(Renderer r)
-        {
-            var mf = r.GetComponent<MeshFilter>();
-            var mesh = mf ? mf.sharedMesh : (r as SkinnedMeshRenderer)?.sharedMesh;
-            return $"{r.name} [{(mesh ? mesh.name + (mesh.isReadable ? "" : " NOT READABLE") : "no mesh")}, active {r.gameObject.activeInHierarchy}, {string.Join("/", r.sharedMaterials.Where(m => m).Select(m => m.name + " " + (m.shader ? m.shader.name : "?") + (IsFoliage(m) ? " foliage" : "")))}{(Snow(r) ? ", snow" : "")}]";
-        }
-
         // Our own sheets are never read as part of what they lie on (probe test 8: that made each paint slower and land
         // on the paint before it).
         internal static bool Ours(Renderer r) => r && r.name.StartsWith(Prefix, StringComparison.Ordinal);
@@ -656,9 +574,6 @@ namespace PotatoPainter
             }
             for (int i = 0; i < n; i++) { var cnt = solid[Find(t[3 * i])]; keep[i] = cnt.all > 0 && cnt.s >= cnt.all * BarkSolid; }
             barkCache[key] = keep;
-            // Test data (0.2.4: bark in fluttering tree materials). Taken out before release.
-            var pieces = solid.Where(kv => kv.Value.all > 0).Select(kv => (float)kv.Value.s / kv.Value.all).OrderByDescending(x => x).ToList();
-            Plugin.Log.LogInfo($"Bark on {mesh.name} ({m.name}): {keep.Count(k => k)} of {n} triangles in {pieces.Count(x => x >= BarkSolid)} of {pieces.Count} pieces; solid texture per piece {string.Join(" ", pieces.Take(8).Select(x => x.ToString("0.00")))}{(pieces.Count > 8 ? " ..." : "")}");
             return keep;
         }
 

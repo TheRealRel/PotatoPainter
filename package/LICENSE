@@ -5,7 +5,8 @@ PotatoPainter is under two licenses.
 
 2. Art: Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
    https://creativecommons.org/licenses/by-nc/4.0/
-   The rune and symbol drawings (the assets folder: *.png), the mod icon (icon.png) and the screenshots (docs/images).
+   The rune and symbol drawings (assets/runes), the Rúnakefli's model and textures (assets/runakefli), the mod icon
+   (icon.png), and the page icons and screenshots (docs/images).
    Copyright (c) 2026 TheRealRel. You may share and adapt them for non-commercial use if you credit
    "TheRealRel (PotatoPainter)" and link https://github.com/TheRealRel/PotatoPainter. Commercial use (including selling
    them or putting them in a paid or paywalled mod) needs written permission.

@@ -15,7 +15,6 @@ namespace PotatoPainter
     {
         private static readonly Dictionary<string, string> keys = new Dictionary<string, string>();
         private static readonly HashSet<string> warned = new HashSet<string>();
-        private static string lastLogged;
 
         // The boss's defeat key, or null when its prefab or key can't be found (then the symbol stays open: logged once).
         internal static string KeyFor(string boss)
@@ -60,15 +59,14 @@ namespace PotatoPainter
             private static void Postfix(PieceTable __instance, Player __1)
             {
                 if (!Plugin.Table || __instance != Plugin.Table) return;
-                var locked = new List<Piece>(); var open = new List<string>();
+                var locked = new List<Piece>();
                 foreach (var go in __instance.m_pieces)
                 {
                     var piece = go ? go.GetComponent<Piece>() : null;
                     var paint = piece ? piece.GetComponent<Paint>() : null;
                     var rune = paint ? Runes.All.FirstOrDefault(r => r.Art == paint.Art) : null;
                     if (rune == null || rune.Boss == null) continue;
-                    if (Open(rune, __1)) { if (!paint.Etched) open.Add(rune.Name); }
-                    else locked.Add(piece);
+                    if (!Open(rune, __1)) locked.Add(piece);
                 }
                 foreach (var piece in locked)
                 {
@@ -77,9 +75,6 @@ namespace PotatoPainter
                     var lists = ByCategory(__instance);
                     if (lists != null) foreach (var list in lists) list?.Remove(piece);
                 }
-                // Test-only (0.4.0): which symbols are open, logged when it changes. Take out before release.
-                var line = $"Symbols unlocked by bosses: {open.Count} ({string.Join(", ", open)}); {locked.Count / 2} still locked.";
-                if (line != lastLogged) { lastLogged = line; Plugin.Log.LogInfo(line); }
             }
         }
     }

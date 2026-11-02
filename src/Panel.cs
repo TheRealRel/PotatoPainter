@@ -129,10 +129,6 @@ namespace PotatoPainter
                     panel.SetActive(true);
                     shown = null;
                     Fit();
-                    // Test data (0.2.1: panel not seen): where it shows on screen. Taken out before release.
-                    var corners = new Vector3[4]; ((RectTransform)panel.transform).GetWorldCorners(corners);
-                    var cam = panel.GetComponentInParent<Canvas>()?.rootCanvas;
-                    Plugin.Log.LogInfo($"Panel open: active {panel.activeInHierarchy}, screen corners {RectTransformUtility.WorldToScreenPoint(cam && cam.renderMode != RenderMode.ScreenSpaceOverlay ? cam.worldCamera : null, corners[0])} to {RectTransformUtility.WorldToScreenPoint(cam && cam.renderMode != RenderMode.ScreenSpaceOverlay ? cam.worldCamera : null, corners[2])} of {Screen.width}x{Screen.height}");
                 }
                 bool etched = EtchedShown(player);
                 if (shown != etched) { shown = etched; Show(etched); }
@@ -324,9 +320,6 @@ namespace PotatoPainter
             Place((RectTransform)lightButton.transform, pad + 44f, y + 6f, 130f, 36f);
             lightButton.GetComponent<Button>().onClick.AddListener(ToggleLight);
             panel.SetActive(false);
-            // Test data (0.2.1: panel not seen): where it was put. Taken out before release.
-            string Path(Transform t) { var parts = new List<string>(); for (; t; t = t.parent) parts.Insert(0, t.name); return string.Join("/", parts); }
-            Plugin.Log.LogInfo($"Panel built on {Path(window)} ({window.rect.width:0}x{window.rect.height:0}, active {window.gameObject.activeInHierarchy}); canvas {(canvas ? ((RectTransform)canvas.transform).rect.size.ToString() : "none")}; text from {Path(textSource.transform)}; background {(source ? source.sprite.name : "none")}");
         }
 
         // Colour sliders: the track and fill give way to a strip of the colours they reach; the handle stays.

@@ -97,10 +97,7 @@ namespace PotatoPainter
             bool first = lastBloom == null;
             lastBloom = now;
             if (first) return;
-            int n = 0;
-            foreach (var p in Paint.Loaded) if (p && p.HasData && p.Etched && p.Retint()) n++;
-            // Test data (0.4.4): taken out before release.
-            Plugin.Log.LogInfo($"Bloom {(now ? "on" : "off")}: glow of {n} etched runes set to the {(now ? "bloom" : "no-bloom")} caps.");
+            foreach (var p in Paint.Loaded) if (p && p.HasData && p.Etched) p.Retint();
         }
     }
 }

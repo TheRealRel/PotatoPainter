@@ -23,7 +23,7 @@ namespace PotatoPainter
     [NetworkCompatibility(CompatibilityLevel.EveryoneMustHaveMod, VersionStrictness.Minor)]
     public class Plugin : BaseUnityPlugin
     {
-        public const string Id = "potato.painter", Version = "0.4.13";
+        public const string Id = "potato.painter", Version = "1.0.0";
         // Saved in worlds and inventories: never rename.
         public const string ToolPrefab = "potato_runakefli";
         public const string TablePrefab = "_PotatoRunakefliPieceTable";
@@ -172,11 +172,10 @@ namespace PotatoPainter
 
         private void LateUpdate()
         {
-            var sw = Perf.Start(); Bend.Update(); Perf.Stop("bend", sw);
-            sw = Perf.Start(); Ground.Update(); Perf.Stop("ground follow", sw, Ground.FrameVerts, Ground.FrameSheets);
+            Bend.Update();
+            Ground.Update();
             Panel.Update();
             GlowCap.Update();
-            Perf.Frame();
         }
 
         // The Rúnakefli's remove: the topmost paint where you aim, with the game's own no-build and ward checks.
@@ -246,9 +245,6 @@ namespace PotatoPainter
                 if (!__result && refused != null && Table && BuildPieces(__instance) == Table)
                 {
                     __instance.Message(MessageHud.MessageType.Center, refused);
-                    // Test data (0.4.11; the user: "warnings randomly of nothing to paint here"): every refused click and why.
-                    // Taken out before release.
-                    Log.LogInfo($"Refused click: {refused}; {Paint.RefusalDetail()}");
                 }
             }
         }

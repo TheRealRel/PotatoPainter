@@ -26,8 +26,6 @@ namespace PotatoPainter
 
         // The placement ghost's latest aim, read by OnPlaced on the same client right after the game places the piece.
         private static Frame aim; private static bool aimValid, aimFar; private static float aimTime; private static int aimLayer;
-        private static string aimWhy;   // test data (0.4.11): why the last aim found nothing, for the refused-click log
-        private static readonly HashSet<string> logged = new HashSet<string>();
         private static float previewCost;   // seconds the last preview trace took
         private static Rune aimRune; private static bool aimEtched; private static float aimSize = DefaultSize; private static Color aimCol, aimGlow; private static bool aimLit;
 
@@ -149,15 +147,6 @@ namespace PotatoPainter
             return null;
         }
 
-        // Test data (0.4.11): why Refusal said no, for the refused-click log. Taken out before release.
-        internal static string RefusalDetail()
-        {
-            float age = Time.time - aimTime;
-            if (!aimValid) return $"aim {age:0.00} s old; {aimWhy ?? "no aim yet"}";
-            if (age > 1f) return $"aim too old: {age:0.00} s (the preview last traced then; last trace took {previewCost * 1000f:0} ms)";
-            return $"aim {age:0.00} s old; same rune already there or symbol locked";
-        }
-
         // The same rune of the same kind, colour, glow, light and size on the same spot. A new colour, size or light over an
         // old one is allowed: it goes on top.
         private static bool Repeats(Paint p, Rune rune, bool etched, Frame f, float size, Color col, Color glow, bool lit, bool share) =>
@@ -196,13 +185,8 @@ namespace PotatoPainter
         // old one when they're done (Update), so placing or loading a large rune doesn't stall a frame (0.4.12).
         private void Rebuild()
         {
-            var sw = Perf.Start();
             if (Etched) { UpdateDim(); nextSun = Time.time + 2f + Random.value; }
             job = Trace.Job.Prepare(Frame, Size, Lift, Look.Material(Rune, Etched), Etched ? Look.HaloFor(Rune) : null, DrawCol, Emission, false, (Etched ? "etch " : "paint ") + Rune.Art);
-            Perf.Stop("paint trace: read hosts", sw);
-            // Test-only: a twin read at the same moment, computed on the game thread when the background one is done.
-            twin = checksLeft > 0 ? Trace.Job.Prepare(job.F, job.Size, job.Lift, job.Material, job.Halo, job.Col, job.Glow, false, job.Name + " twin") : null;
-            prepareTime = Time.time;
             Trace.Run(job);
             nextCheck = Time.time + 2f + Random.value;
         }
@@ -210,10 +194,7 @@ namespace PotatoPainter
         // The finished trace drawn in place of the old one.
         private void Apply(Trace.Job j)
         {
-            var sw = Perf.Start();
             var nb = j.Finish();
-            Perf.Stop("paint trace: sheet build", sw, nb.Sheets);
-            if (!j.Done && j.Error == null) Perf.Add("paint trace: math (other thread)", j.ComputeMs, j.Casts);
             built?.Clear();
             built = nb;
             if (Etched && Lit && built.Sheets > 0)
@@ -223,41 +204,6 @@ namespace PotatoPainter
             }
             if (Etched) Retint();   // the sun may have moved while it traced
             Grass.Set(this, built.OnGround, Frame, Size);
-            if (twin != null && checksLeft > 0 && !j.Done) Check(j); twin = null;
-        }
-
-        // Test-only (0.4.12, 0.4.13): the first traces finished from the thread pool are compared point for point with
-        // (a) a twin read at the same moment and computed on the game thread (same world: tells the thread apart) and
-        // (b) a trace done all on the game thread now (the world may have changed since: hosts loading in). Taken out before release.
-        private static int checksLeft = 24;
-        private Trace.Job twin; private float prepareTime;
-        private void Check(Trace.Job j)
-        {
-            checksLeft--;
-            Built tw = twin.Done ? twin.Finish() : null;
-            if (tw == null) { twin.Compute(); tw = twin.Finish(); }
-            var now = Trace.Build(j.F, j.Size, j.Lift, j.Material, j.Halo, j.Col, j.Glow, false, j.Name + " check");
-            Plugin.Log.LogInfo($"Trace thread check ({Rune?.Art}, size {Size:0.0}, read {Time.time - prepareTime:0.00} s ago): background {Describe(built)}; " +
-                $"twin on the game thread {Describe(tw)}, {Compare(built, tw)}; traced again now {Describe(now)}, {Compare(built, now)}");
-            tw.Clear(); now.Clear();
-        }
-        private static string Describe(Built b) => $"{b.Sheets} sheets, {b.Strokes.Count} strokes, {b.Hosts.Count} hosts";
-        private static string Compare(Built a, Built b)
-        {
-            if (a.Sheets != b.Sheets || a.Strokes.Count != b.Strokes.Count) return "sheet counts differ" + (a.Hosts.SetEquals(b.Hosts) ? " (same hosts)" : " (other hosts)");
-            int diff = 0, points = 0;
-            for (int i = 0; i < a.Strokes.Count; i++)
-            {
-                var ma = a.Strokes[i] ? a.Strokes[i].GetComponent<MeshFilter>()?.sharedMesh : null;
-                var mb = b.Strokes[i] ? b.Strokes[i].GetComponent<MeshFilter>()?.sharedMesh : null;
-                if (!ma || !mb) return $"sheet {i} missing in {(!ma ? "the first" : "the second")}";
-                var va = ma.vertices; var vb = mb.vertices; var ta = ma.triangles; var tb = mb.triangles;
-                if (va.Length != vb.Length || ta.Length != tb.Length) return $"sheet {i} sizes differ ({va.Length} against {vb.Length} points)";
-                for (int v = 0; v < va.Length; v++) { points++; if (va[v] != vb[v]) diff++; }
-                for (int t = 0; t < ta.Length; t++) if (ta[t] != tb[t]) diff++;
-                if (a.Strokes[i].transform.parent != b.Strokes[i].transform.parent) diff++;
-            }
-            return $"{points} points, {diff} different";
         }
 
         // The sun dimming now (SunDim); true when it moved enough to redraw.
@@ -310,7 +256,7 @@ namespace PotatoPainter
             if (Time.time < nextCheck || built == null) return;
             nextCheck = Time.time + 2f;
             // Rebuild when what lies under it changed: something loaded after it, or unloaded, or was replaced.
-            var hc = Perf.Start(); bool changed = !Trace.HostIds(Frame.Center, Size).SetEquals(built.Hosts); Perf.Stop("host check", hc);
+            bool changed = !Trace.HostIds(Frame.Center, Size).SetEquals(built.Hosts);
             if (changed) Rebuild();
         }
 
@@ -343,15 +289,7 @@ namespace PotatoPainter
             float far = aimed && player ? Vector3.Distance(player.GetEyePoint(), aim.Center) : 0f;
             aimFar = aimed && player && far > player.m_maxPlaceDistance;
             aimValid = aimed && !aimFar;
-            aimWhy = aimed ? (aimFar ? $"farther than you can build: {far:0.00} m from your eyes, the most is {player.m_maxPlaceDistance:0.00} m" : null)
-                : $"{Trace.Why}; {Trace.WhyDetail}";
             aimTime = Time.time; aimRune = Rune; aimEtched = Etched; aimSize = size; aimCol = col; aimGlow = kept; aimLit = Etched && Settings.Light;
-            // Test data (0.2.2: "some trees aren't registering"): each object and reason once. Taken out before release.
-            if (!aimValid && Trace.WhyHit)
-            {
-                var key = Trace.RootOf(Trace.WhyHit).name + "|" + (Trace.Why ?? "farther than you can build");
-                if (logged.Add(key)) Plugin.Log.LogInfo($"Nothing to paint where you aim: {Trace.Why ?? "farther than you can build"}; {(Trace.WhyDetail != null ? Trace.WhyDetail + "; " : "")}{Trace.Describe(Trace.WhyHit)}");
-            }
             if (!aimValid) { Grass.Clear(this); ghostGrassAt = null; if (previewLight) previewLight.enabled = false; return; }
             if (ghostGrassAt.HasValue && Vector3.Distance(ghostGrassAt.Value, aim.Center) > 0.25f) { Grass.Clear(this); ghostGrassAt = null; }
             aimLayer = LayerAt(aim.Center, size, null);
@@ -361,10 +299,9 @@ namespace PotatoPainter
                 float df = SunDim.Factor(kept, Settings.Glow, SunDim.Day(), SunDim.Sun(aim, size), GlowCap.Bloom);
                 glow *= df; glow.a = 1f;
             }
-            var sw = Perf.Start();
+            var sw = System.Diagnostics.Stopwatch.StartNew();
             preview = Trace.Build(aim, size, 0.004f + 0.002f * aimLayer, Look.Material(Rune, Etched), Etched ? Look.HaloFor(Rune) : null, col, glow, true, "preview");
             previewCost = (float)sw.Elapsed.TotalSeconds;
-            Perf.Stop("preview trace size " + size.ToString("0.0"), sw, preview.Sheets);
             // The rune's light in the preview too, so it shows what will be placed.
             // Not when the same lit rune already lies right there (just placed, the aim unmoved): its own light shows it.
             bool lit = aimLit && preview.Sheets > 0 && glow.maxColorComponent > 0f
